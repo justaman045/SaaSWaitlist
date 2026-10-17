@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React_19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Firebase](https://img.shields.io/badge/Firebase-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v3-06B6D4?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-06B6D4?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 [![Cloudinary](https://img.shields.io/badge/Cloudinary-3448C5?logo=cloudinary&logoColor=white)](https://cloudinary.com)
 [![License](https://img.shields.io/github/license/justaman045/SaaSWaitlist)](LICENSE)
 
@@ -29,7 +29,7 @@ A modern waitlist management platform where makers list upcoming SaaS products a
 | Database | Firebase Firestore |
 | Auth | Firebase Authentication (email/password) |
 | Image storage | Cloudinary (unsigned uploads) |
-| Styling | Tailwind CSS v3, shadcn/ui, Framer Motion |
+| Styling | Tailwind CSS v4, shadcn/ui, Framer Motion |
 | Forms & validation | react-hook-form + Zod |
 | Markdown | react-markdown + rehype-raw |
 | Deployment | Vercel |

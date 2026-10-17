@@ -1,9 +1,7 @@
 import type { Config } from "tailwindcss"
-import typography from "@tailwindcss/typography"
-import { fontFamily } from "tailwindcss/defaultTheme"
+import defaultTheme from "tailwindcss/defaultTheme"
 
 const config = {
-	darkMode: ["class"],
 	content: [
 		'./pages/**/*.{ts,tsx}',
 		'./components/**/*.{ts,tsx}',
@@ -23,7 +21,7 @@ const config = {
 			fontFamily: {
 				sans: [
 					'var(--font-sans)',
-					...fontFamily.sans
+					...defaultTheme.fontFamily.sans
 				]
 			},
 			colors: {
@@ -97,7 +95,6 @@ const config = {
 			}
 		}
 	},
-	plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config
 
 export default config
