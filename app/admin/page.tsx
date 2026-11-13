@@ -61,7 +61,7 @@ export default async function AdminDashboard() {
                         {projects.length === 0 && (
                             <TableRow>
                                 <TableCell colSpan={5} className="h-64 text-center text-muted-foreground">
-                                    No projects found. Click "New Project" to get started.
+                                    No projects found. Click &quot;New Project&quot; to get started.
                                 </TableCell>
                             </TableRow>
                         )}

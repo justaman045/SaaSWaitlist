@@ -1,4 +1,4 @@
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 
 const testimonials = [
@@ -30,7 +30,7 @@ export function TestimonialsSection() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 {testimonials.map((testimonial) => (
-                    <Card key={testimonial.name} className="bg-white/5 border-white/10 shadow-lg rounded-3xl backdrop-blur-sm hover:bg-white/10 transition-colors">
+                    <Card key={testimonial.name} className="bg-white/5 border-white/10 shadow-lg rounded-3xl backdrop-blur-sm hover:bg-muted/50 transition-colors">
                         <CardHeader className="flex flex-row items-center gap-4 pb-4">
                             <Avatar>
                                 <AvatarFallback>{testimonial.avatar}</AvatarFallback>
@@ -42,7 +42,7 @@ export function TestimonialsSection() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-sm text-muted-foreground leading-relaxed">
-                                "{testimonial.content}"
+                                &quot;{testimonial.content}&quot;
                             </p>
                         </CardContent>
                     </Card>

@@ -32,7 +32,7 @@ export function AdminLogin() {
             await signInWithEmailAndPassword(auth, email, password)
             toast.success("Welcome back!")
             router.push("/admin")
-        } catch (error: any) {
+        } catch (error) {
             console.error("Login error:", error)
             toast.error("Invalid credentials")
         } finally {

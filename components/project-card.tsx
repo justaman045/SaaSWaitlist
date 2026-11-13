@@ -68,7 +68,7 @@ export function ProjectCard({ project }: { project: Project }) {
                 </div>
 
                 <Link href={`/projects/${project.slug}`}>
-                    <Button size="sm" variant="secondary" className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors rounded-full px-4 h-8">
+                    <Button size="sm" className="bg-secondary text-secondary-foreground group-hover:bg-primary group-hover:text-primary-foreground hover:bg-secondary/80 hover:text-secondary-foreground rounded-full px-4 h-8 transition-colors">
                         View
                         <ArrowUpRight className="ml-1 h-3 w-3" />
                     </Button>

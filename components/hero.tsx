@@ -47,7 +47,7 @@ export function Hero() {
                     className="flex flex-wrap items-center justify-center gap-4"
                 >
                     <Link href="/projects">
-                        <Button size="lg" className="h-12 px-8 rounded-full text-base bg-white text-black hover:bg-white/90 font-semibold shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_rgba(255,255,255,0.4)] transition-all">
+                        <Button size="lg" className="h-12 px-8 rounded-full text-base font-semibold shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_rgba(255,255,255,0.4)] transition-all">
                             Explore Projects
                             <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>

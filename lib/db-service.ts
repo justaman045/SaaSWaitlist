@@ -2,17 +2,19 @@ import { db } from "@/lib/firebase"
 import { collection, getDocs, query, where, getDoc, doc, orderBy, deleteDoc } from "firebase/firestore"
 import { Project } from "@/types"
 
-const convertTimestamps = (data: any) => {
+const convertTimestamps = (data: Record<string, unknown>) => {
     const result = { ...data };
 
-    if (result.createdAt?.toDate) {
-        result.createdAt = result.createdAt.toDate().toISOString();
+    const createdAt = result.createdAt as { toDate?: () => Date } | undefined;
+    if (createdAt?.toDate) {
+        result.createdAt = createdAt.toDate().toISOString();
     } else if (!result.createdAt || typeof result.createdAt !== 'string') {
         result.createdAt = new Date().toISOString();
     }
 
-    if (result.updatedAt?.toDate) {
-        result.updatedAt = result.updatedAt.toDate().toISOString();
+    const updatedAt = result.updatedAt as { toDate?: () => Date } | undefined;
+    if (updatedAt?.toDate) {
+        result.updatedAt = updatedAt.toDate().toISOString();
     }
 
     return result;
@@ -34,6 +36,18 @@ export async function getProjects(filters?: ProjectFilters): Promise<Project[]> 
             id: doc.id,
             ...convertTimestamps(doc.data())
         } as Project));
+
+        // Populate waitlistCount per project
+        const waitlistSnapshot = await getDocs(collection(db, 'waitlist'));
+        const waitlistCounts: Record<string, number> = {};
+        waitlistSnapshot.docs.forEach(wd => {
+            const pid = (wd.data() as Record<string, unknown>).projectId as string;
+            waitlistCounts[pid] = (waitlistCounts[pid] || 0) + 1;
+        });
+        projectList = projectList.map(p => ({
+            ...p,
+            waitlistCount: waitlistCounts[p.id] ?? 0,
+        }));
 
         // Filter in-memory
         if (filters) {
@@ -66,7 +80,7 @@ export async function getProjects(filters?: ProjectFilters): Promise<Project[]> 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
     try {
         const projectsCol = collection(db, 'projects');
-        const q = query(projectsCol, where("slug", "==", slug));
+        const q = query(projectsCol, where("slug", "==", slug), where("status", "==", "active"));
         const querySnapshot = await getDocs(q);
 
         if (querySnapshot.empty) {

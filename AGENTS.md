@@ -20,17 +20,25 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - Only the **client** Firebase SDK is used (`lib/firebase.ts`), even for server components. `firebase-admin` was removed from `package.json` (it was an unused dependency); don't reintroduce it or `FIREBASE_SERVICE_ACCOUNT`.
 - `lib/firebase.ts` falls back to mock config when `NEXT_PUBLIC_FIREBASE_*` is unset, so dev/build succeeds without credentials but Firestore reads silently return empty (`getProjects` swallows errors and returns `[]`).
 - Public pages fetch Firestore from RSC at build/revalidate time; `app/page.tsx` and `app/projects/page.tsx` set `export const revalidate = 60`, `app/admin/page.tsx` is `dynamic = 'force-dynamic'`. Firestore rules must allow public reads for these to populate.
-- `getProjects` filters **in memory** after fetching all docs — no composite indexes needed, and adding a Firestore query/index won't change filtering behavior.
-- Admin access is client-side only (`onAuthStateChanged` in `app/admin/layout.tsx`); it is not a server-side security boundary.
+- `getProjects` filters **in memory** after fetching all docs — no composite indexes needed, and adding a Firestore query/index won't change filtering behavior. `getProjects` also populates `waitlistCount` per project by counting waitlist docs. `getProjectBySlug` filters by `status === "active"` so coming_soon projects aren't publicly accessible via direct URL.
+- Admin access is client-side only (`onAuthStateChanged` in `app/admin/layout.tsx`); it is not a server-side security boundary. Firestore security rules live in `firestore.rules` — deploy them before production use. Waitlist writes use a composite document ID (`${projectId}_${email}`) to prevent duplicates at the database level.
 - `lib/data.ts` (sample `projects`) and `components/auth-provider.tsx` (`AuthProvider`/`useAuth`) are unused dead code.
 
 ## Cloudinary uploads
 
 - The live path is the unsigned **client-side** upload in `components/ui/image-upload.tsx` (used by `components/project-form.tsx`), requiring `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` and `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`.
-- `app/api/upload/route.ts` (server-signed upload using `CLOUDINARY_API_KEY`/`CLOUDINARY_API_SECRET`) is referenced nowhere. Prefer the existing client path unless intentionally resurrecting the route.
+
+## Public API
+
+- **`GET /api/projects`** (`app/api/projects/route.ts`) — returns all projects (active + coming_soon) as JSON: `{ projects: Project[], count: number }`.
+- Supports query params forwarded to `getProjects()`: `?search=`, `?category=`, `?tag=`.
+- Sets CORS headers (`Access-Control-Allow-Origin: *`) for cross-origin use from other websites.
+- `export const revalidate = 60` (1-minute stale-while-revalidate, matching public pages).
+- Public reads on `projects` are allowed by `firestore.rules`, so no auth is required.
 
 ## Environment
 
+- Prerequisite: **Node 20+** (README). `npm run dev` may fail on older Node.
 - `.env*` is gitignored and there is **no `.env.example`**, despite the README telling you to `cp .env.example .env.local`. Create `.env.local` by hand.
 
 ## Dependencies / security
@@ -40,6 +48,7 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
   - `postcss-selector-parser` → `^7.1.6` (fixes `@tailwindcss/typography`).
   - `@next/eslint-plugin-next.fast-glob` → aliased to `npm:tinyglobby`. This removes `braces` (and `micromatch`/`chokidar`), whose advisory has **no patched `braces` release**. Tailwind v4 also drops those, so `fast-glob`/`micromatch`/`braces` are gone from the tree.
 - `next` and `eslint-config-next` are pinned to the same version (`16.4.2`); bump them together.
+- Lint is clean (0 errors) — `npm run lint` exits 0. The 4 remaining warnings are pre-existing and non-blocking (unused `orderBy` import, `` elements, React Hook Form watch incompatibility).
 
 ## Do not run
 

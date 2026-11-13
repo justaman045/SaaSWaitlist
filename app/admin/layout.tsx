@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { auth } from "@/lib/firebase"
-import { onAuthStateChanged } from "firebase/auth"
+import { onAuthStateChanged, type User } from "firebase/auth"
 import { AdminLogin } from "@/components/admin-login"
 import { Loader2, LayoutDashboard, LogOut } from "lucide-react"
 import Link from "next/link"
@@ -11,7 +11,7 @@ import { signOut } from "firebase/auth"
 import { toast } from "sonner"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-    const [user, setUser] = useState<any>(null)
+    const [user, setUser] = useState<User | null>(null)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {

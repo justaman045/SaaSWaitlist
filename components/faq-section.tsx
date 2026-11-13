@@ -28,7 +28,7 @@ export function FAQSection() {
                     <AccordionItem value="item-3" className="border-none rounded-2xl bg-white/5 px-6">
                         <AccordionTrigger className="hover:no-underline hover:text-primary transition-colors text-left">How do I submit my own project?</AccordionTrigger>
                         <AccordionContent className="text-muted-foreground leading-relaxed">
-                            If you are a builder, you can submit your project by clicking the "Submit Project" button in the navigation bar. You'll need to create a simple admin account to manage your listing.
+                            If you are a builder, you can submit your project by clicking the &quot;Submit Project&quot; button in the navigation bar. You&apos;ll need to create a simple admin account to manage your listing.
                         </AccordionContent>
                     </AccordionItem>
                     <AccordionItem value="item-4" className="border-none rounded-2xl bg-white/5 px-6">

@@ -35,18 +35,16 @@ export function ImageGallery({ images, title }: ImageGalleryProps) {
                     {/* Navigation Buttons */}
                     <div className="absolute inset-0 flex items-center justify-between p-4 opacity-0 group-hover/gallery:opacity-100 transition-opacity duration-300">
                         <Button
-                            variant="secondary"
                             size="icon"
                             onClick={handlePrevious}
-                            className="bg-black/50 hover:bg-black/70 text-white border-white/10 rounded-full h-10 w-10 backdrop-blur-md"
+                            className="bg-muted/50 hover:bg-muted/80 text-foreground border-white/10 rounded-full h-10 w-10 backdrop-blur-md"
                         >
                             <ChevronLeft className="h-6 w-6" />
                         </Button>
                         <Button
-                            variant="secondary"
                             size="icon"
                             onClick={handleNext}
-                            className="bg-black/50 hover:bg-black/70 text-white border-white/10 rounded-full h-10 w-10 backdrop-blur-md"
+                            className="bg-muted/50 hover:bg-muted/80 text-foreground border-white/10 rounded-full h-10 w-10 backdrop-blur-md"
                         >
                             <ChevronRight className="h-6 w-6" />
                         </Button>

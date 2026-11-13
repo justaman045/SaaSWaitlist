@@ -188,7 +188,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                     project.websiteUrl && (
                                         <div className="group/btn relative">
                                             <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[1.25rem] blur opacity-60 group-hover/btn:opacity-100 transition duration-500"></div>
-                                            <Button asChild className="relative w-full rounded-[1.25rem] h-14 bg-zinc-950 hover:bg-zinc-900 text-white border border-white/10 shadow-xl transition-all duration-300" size="lg">
+                                            <Button asChild variant="default" size="lg" className="relative w-full rounded-[1.25rem] h-14 border border-white/10 shadow-xl transition-all duration-300">
                                                 <a href={project.websiteUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-3 text-lg font-medium">
                                                     Visit Application
                                                     <ExternalLink className="h-5 w-5" />

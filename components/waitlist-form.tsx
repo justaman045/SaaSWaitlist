@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { db } from "@/lib/firebase"
-import { collection, addDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore"
+import { collection, doc, setDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 
@@ -31,7 +31,7 @@ export function WaitlistForm({ projectId }: { projectId: string }) {
                 return
             }
 
-            await addDoc(collection(db, "waitlist"), {
+            await setDoc(doc(db, "waitlist", `${projectId}_${email}`), {
                 projectId,
                 email,
                 createdAt: serverTimestamp(),

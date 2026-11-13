@@ -15,7 +15,7 @@ export function CTASection() {
                 </p>
                 <div className="mt-10 flex items-center justify-center gap-x-6">
                     <Link href="/admin/new">
-                        <Button size="lg" className="rounded-full px-8 bg-white text-black hover:bg-white/90 font-semibold">
+                        <Button size="lg" className="rounded-full px-8 font-semibold">
                             Submit Your Project
                         </Button>
                     </Link>
