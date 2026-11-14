@@ -40,7 +40,7 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 
 - Waitlist signup (`components/waitlist-form.tsx`) saves the email to `localStorage` under key `saaswaitlist_waitlist_<projectId>` on successful signup.
 - Project detail page (`app/projects/[slug]/page.tsx`) uses `WaitlistStatus` (`components/waitlist-status.tsx`) which checks localStorage:
-  - Not registered → shows `WaitlistForm`
+  - Not registered → **redirects to Nexus website** (http://localhost:3001 dev / https://nexusprods.vercel.app prod)
   - Already registered → shows "You&apos;re already on the waitlist!" + `NexusLink` button
 - **`NexusLink`** (`components/nexus-link.tsx`) — button linking to the Nexus company website:
   - Dev: `http://localhost:3001` (from `NEXT_PUBLIC_NEXUS_URL` or fallback)
