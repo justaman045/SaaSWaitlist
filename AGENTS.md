@@ -70,6 +70,12 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - Admin features (project create/edit/delete) are **blocked** until email is verified — required because nexusprods' `POST /api/products` checks `emailVerified === true`.
 - Once verified, the user is redirected to the normal admin dashboard on next load.
 
+## Google Sign-In (Admin Access)
+
+- `components/admin-login.tsx` — includes a "Sign in with Google" button using `signInWithPopup(auth, googleProvider)` from Firebase Auth.
+- Requires Google sign-in to be **enabled in Firebase Console** → Authentication → Sign-in method → Google → Enable.
+- The Google account used must match an email in `NEXT_PUBLIC_ADMIN_EMAILS` and be email-verified for nexusprods API access.
+
 ## Environment
 
 - Prerequisite: **Node 20+** (README). `npm run dev` may fail on older Node.
