@@ -121,6 +121,11 @@ export async function deleteProductFromNexus(
             },
         })
 
+        // 404 means product already deleted on nexus — treat as success
+        if (response.status === 404) {
+            return { ok: true }
+        }
+
         if (!response.ok) {
             let errorMsg = `Nexus delete failed (HTTP ${response.status})`
             try {
