@@ -22,8 +22,6 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - Public pages fetch Firestore from RSC at build/revalidate time; `app/page.tsx` and `app/projects/page.tsx` set `export const revalidate = 60`, `app/admin/page.tsx` is `dynamic = 'force-dynamic'`. Firestore rules must allow public reads for these to populate.
 - `getProjects` filters **in memory** after fetching all docs — no composite indexes needed, and adding a Firestore query/index won't change filtering behavior. `getProjects` also populates `waitlistCount` per project by counting waitlist docs. `getProjectBySlug` filters by `status === "active"` so coming_soon projects aren't publicly accessible via direct URL.
 - Admin access is client-side only (`onAuthStateChanged` in `app/admin/layout.tsx`); it is not a server-side security boundary. Firestore security rules live in `firestore.rules` — deploy them before production use. Waitlist writes use a composite document ID (`${projectId}_${email}`) to prevent duplicates at the database level.
-- `lib/data.ts` (sample `projects`) and `components/auth-provider.tsx` (`AuthProvider`/`useAuth`) are unused dead code.
-
 ## Cloudinary uploads
 
 - The live path is the unsigned **client-side** upload in `components/ui/image-upload.tsx` (used by `components/project-form.tsx`), requiring `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` and `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`.
@@ -48,6 +46,23 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
   - Shows "5% off subscription" badge
 - Add `NEXT_PUBLIC_NEXUS_URL` to `.env.local` to override the Nexus URL.
 
+
+## Nexus Project Sync
+
+- `lib/nexus.ts` — `syncProjectToNexus(project, idToken)` mirrors a project to nexusprods via `POST /api/products` with `Authorization: Bearer <firebase-id-token>`. Requires the signed-in admin's email to be verified and in `NEXT_PUBLIC_ADMIN_EMAILS`.
+- **Nexus URL (dev vs prod):** In development (`NODE_ENV === "development"`), defaults to `http://localhost:3001/api/products` for the API and `http://localhost:3001` for product page links. In production, defaults to `https://nexusprods.vercel.app/api/products` and `https://nexusprods.vercel.app`. Override with `NEXT_PUBLIC_NEXUS_API_URL` and `NEXT_PUBLIC_NEXUS_URL` in `.env.local`.
+- **Transactional:** nexus is created FIRST, then local Firestore write. If nexus fails, the local project is NOT written (no orphaned records). Configured in `components/project-form.tsx` `onSubmit`.
+- Sync triggers on: new project create, or edit flipping `coming_soon → active`. Edits of already-active projects do NOT re-sync (nexus has no update endpoint).
+- Field mapping: `name`←`title`, `price`←`pricing` (string→number, defaults to 0), `category`←`category` (defaults to "General"), `status`←`active`→`live` / `coming_soon`→`upcoming`, `description`/`longDescription`←`description`, `imageUrl`←`imageUrl`, `demoUrl`←`websiteUrl`, `features`←`tags`.
+- `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
+- Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
+
+## Email Verification (Admin Access)
+
+- `app/admin/layout.tsx` — after sign-in, if `user.emailVerified === false`, shows a "Verify your email" banner with a **Resend Verification Link** button instead of the admin dashboard.
+- `sendEmailVerification(user)` from `firebase/auth` is called when the button is clicked. Firebase sends a verification email to the user's address.
+- Admin features (project create/edit/delete) are **blocked** until email is verified — required because nexusprods' `POST /api/products` checks `emailVerified === true`.
+- Once verified, the user is redirected to the normal admin dashboard on next load.
 
 ## Environment
 

@@ -188,6 +188,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 {project.status === "active" ? (
                                     <div className="flex flex-col gap-3">
                                         <NexusLink discount="5%" />
+                                        {project.nexusProductId && (
+                                            <div className="group/btn relative">
+                                                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[1.25rem] blur opacity-60 group-hover/btn:opacity-100 transition duration-500"></div>
+                                                <Button asChild variant="outline" size="lg" className="relative w-full rounded-[1.25rem] h-14 border border-white/10 shadow-xl transition-all duration-300">
+                                                    <a href={`https://nexusprods.vercel.app/products/${project.nexusProductId}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-3 text-lg font-medium">
+                                                        Open on Nexus
+                                                        <ExternalLink className="h-5 w-5" />
+                                                    </a>
+                                                </Button>
+                                            </div>
+                                        )}
                                         {project.websiteUrl && (
                                             <div className="group/btn relative">
                                                 <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[1.25rem] blur opacity-60 group-hover/btn:opacity-100 transition duration-500"></div>

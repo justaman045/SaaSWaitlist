@@ -15,6 +15,7 @@ export interface Project {
     pricing?: string
     launchDate?: string
     waitlistCount?: number
+    nexusProductId?: string // id of the mirrored product on nexusprods
     createdAt: string // ISO string for now
     updatedAt?: string
 }

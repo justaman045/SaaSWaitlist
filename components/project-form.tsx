@@ -6,7 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore"
-import { db } from "@/lib/firebase"
+import { db, auth } from "@/lib/firebase"
+import { syncProjectToNexus } from "@/lib/nexus"
 import ImageUpload from "@/components/ui/image-upload"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -89,6 +90,22 @@ export default function ProjectForm({ initialData }: ProjectFormProps) {
     const onSubmit = async (data: FormData) => {
         setIsLoading(true)
         try {
+            // Get Firebase ID token for nexus admin authorization
+            const currentUser = auth.currentUser
+            if (!currentUser) {
+                throw new Error("Not authenticated. Please sign in again.")
+            }
+
+            // Block nexus sync if email is not verified — nexusprods requires emailVerified === true
+            if (!currentUser.emailVerified) {
+                throw new Error(
+                    "Email not verified. Please verify your email before creating a project. " +
+                    "Check your inbox for a verification link, or click 'Resend Verification Link' in the admin dashboard."
+                )
+            }
+
+            const idToken = await currentUser.getIdToken()
+
             const projectData = {
                 ...data,
                 tags: data.tags ? data.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
@@ -98,15 +115,49 @@ export default function ProjectForm({ initialData }: ProjectFormProps) {
                 launchDate: data.launchDate,
             }
 
+            // Determine if nexus sync is needed:
+            // - Create: always sync
+            // - Edit: only sync when flipping coming_soon -> active
+            const shouldSyncToNexus = !initialData
+                || (initialData.status === "coming_soon" && data.status === "active")
+
+            let nexusProductId: string | undefined
+
+            if (shouldSyncToNexus) {
+                const projectForNexus: Project = {
+                    id: initialData?.id || "",
+                    title: data.title,
+                    description: data.description,
+                    shortDescription: data.shortDescription,
+                    slug: data.slug,
+                    status: data.status,
+                    imageUrl: data.imageUrl,
+                    websiteUrl: data.websiteUrl,
+                    category: data.category,
+                    tags: data.tags ? data.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
+                    pricing: data.pricing,
+                    createdAt: new Date().toISOString(),
+                }
+
+                const result = await syncProjectToNexus(projectForNexus, idToken)
+                if (!result.ok) {
+                    console.error("Nexus sync failed:", result.error)
+                    throw new Error(result.error || "Nexus project creation failed")
+                }
+                nexusProductId = result.nexusId
+            }
+
             if (initialData) {
                 await updateDoc(doc(db, "projects", initialData.id), {
                     ...projectData,
+                    ...(nexusProductId ? { nexusProductId } : {}),
                     updatedAt: serverTimestamp(),
                 })
                 toast.success("Project updated successfully")
             } else {
                 await addDoc(collection(db, "projects"), {
                     ...projectData,
+                    ...(nexusProductId ? { nexusProductId } : {}),
                     createdAt: serverTimestamp(),
                 })
                 toast.success("Project created successfully")
