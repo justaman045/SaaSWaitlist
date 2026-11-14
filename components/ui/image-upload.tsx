@@ -43,7 +43,14 @@ export default function ImageUpload({
                 )
 
                 if (!response.ok) {
-                    throw new Error("Upload failed")
+                    let errorMsg = `Upload failed (HTTP ${response.status})`
+                    try {
+                        const errorBody = await response.json()
+                        errorMsg = errorBody?.error?.message || errorBody?.message || errorMsg
+                    } catch {
+                        // ignore parse errors
+                    }
+                    throw new Error(errorMsg)
                 }
 
                 const data = await response.json()
@@ -82,6 +89,8 @@ export default function ImageUpload({
                             className="object-cover"
                             alt="Image"
                             src={url}
+                            sizes="(max-width: 768px) 100vw, 200px"
+                            style={{ objectFit: "cover" }}
                         />
                     </div>
                 ))}
