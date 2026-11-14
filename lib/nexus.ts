@@ -212,7 +212,7 @@ export async function syncDeletionsFromNexus(
         }
     } catch (error) {
         // Silent failure for fetch errors — nexusprods may be down or unreachable
-        console.error("Nexus deletion sync skipped:", error instanceof Error ? error.message : String(error))
+        console.log("Nexus deletion sync skipped:", error instanceof Error ? error.message : String(error))
     }
 
     return { deleted, errors }
