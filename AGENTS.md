@@ -57,11 +57,19 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
 - Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
 
-## Nexus Delete Sync (Bidirectional)
+## Nexus Sync (Bidirectional — Create, Update, Delete)
 
-- **Local → Nexus:** Deleting a project in the admin edit form also deletes it from nexusprods via `DELETE http://localhost:3001/api/products/<nexusProductId>` (dev) or `DELETE https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod), using the same Bearer token auth. If nexus delete fails, the local delete is aborted.
-- **Nexus → Local (periodic):** `app/admin/layout.tsx` runs `syncDeletionsFromNexus()` every 5 minutes when the admin is signed in with a verified email. It fetches all products from nexusprods `GET /api/products` and deletes any local project whose `nexusProductId` no longer exists on nexus (e.g. deleted directly on nexusprods).
-- `lib/nexus.ts` exports: `syncProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`. Runs on the client (no `"use server"`) so Firestore deletes use the authenticated user's context.
+- **Local → Nexus (Create):** New projects → `POST http://localhost:3001/api/products` (dev) or `POST https://nexusprods.vercel.app/api/products` (prod) with `Authorization: Bearer <firebase-id-token>`. Transactional: nexus created FIRST, then local Firestore write. If nexus fails, local project is NOT written.
+- **Local → Nexus (Update):** Editing any project → `PUT http://localhost:3001/api/products/<nexusProductId>` (dev) or `PUT https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod). Syncs on every edit (title, description, status, category, pricing, imageUrl, websiteUrl, tags).
+- **Local → Nexus (Delete):** Deleting a project → `DELETE http://localhost:3001/api/products/<nexusProductId>` (dev) or `DELETE https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod). If nexus delete fails (404 = already gone), treated as success. Local delete aborted if nexus delete fails.
+- **Nexus → Local (periodic, every 5 min):** `app/admin/layout.tsx` runs `syncDeletionsFromNexus()` when admin is signed in with verified email. Fetches `GET /api/products` from nexusprods:
+  - Local projects whose `nexusProductId` no longer exists on nexus → deleted locally
+  - Local projects whose fields differ from nexus → updated locally (title, description, status, category, pricing, imageUrl, websiteUrl, tags)
+- `lib/nexus.ts` exports: `syncProjectToNexus()`, `updateProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`. Runs on the client (no `"use server"`) so Firestore writes use the authenticated user's context.
+- **Field mapping (local → nexus):** `name`←`title`, `price`←`pricing` (string→number, default 0), `category`←`category` (default "General"), `status`←`active`→`live` / `coming_soon`→`upcoming`, `description`/`longDescription`←`description`, `imageUrl`←`imageUrl`, `demoUrl`←`websiteUrl`, `features`←`tags`.
+- **Field mapping (nexus → local):** reverse of above; `live`→`active`, `upcoming`→`coming_soon`, `draft`→`coming_soon`, `archived`→`coming_soon`.
+- `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
+- Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
 
 ## Email Verification (Admin Access)
 
