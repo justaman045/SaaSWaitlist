@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore"
 import { db, auth } from "@/lib/firebase"
-import { syncProjectToNexus, deleteProductFromNexus } from "@/lib/nexus"
+import { syncProjectToNexus, updateProjectToNexus, deleteProductFromNexus } from "@/lib/nexus"
 import ImageUpload from "@/components/ui/image-upload"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -116,14 +116,17 @@ export default function ProjectForm({ initialData }: ProjectFormProps) {
             }
 
             // Determine if nexus sync is needed:
-            // - Create: always sync
-            // - Edit: only sync when flipping coming_soon -> active
-            const shouldSyncToNexus = !initialData
-                || (initialData.status === "coming_soon" && data.status === "active")
+            // - Create: always sync (create on nexus)
+            // - Edit with nexusProductId: always sync (update on nexus)
+            // - Edit without nexusProductId, flipping coming_soon -> active: create on nexus
+            // - Edit without nexusProductId, not flipping to active: no sync
+            const shouldCreateOnNexus = !initialData
+                || (initialData.status === "coming_soon" && data.status === "active" && !initialData.nexusProductId)
+            const shouldUpdateOnNexus = initialData && !!initialData.nexusProductId
 
             let nexusProductId: string | undefined
 
-            if (shouldSyncToNexus) {
+            if (shouldCreateOnNexus) {
                 const projectForNexus: Project = {
                     id: initialData?.id || "",
                     title: data.title,
@@ -145,6 +148,29 @@ export default function ProjectForm({ initialData }: ProjectFormProps) {
                     throw new Error(result.error || "Nexus project creation failed")
                 }
                 nexusProductId = result.nexusId
+            } else if (shouldUpdateOnNexus) {
+                const projectForNexus: Project = {
+                    id: initialData.id,
+                    title: data.title,
+                    description: data.description,
+                    shortDescription: data.shortDescription,
+                    slug: data.slug,
+                    status: data.status,
+                    imageUrl: data.imageUrl,
+                    websiteUrl: data.websiteUrl,
+                    category: data.category,
+                    tags: data.tags ? data.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
+                    pricing: data.pricing,
+                    createdAt: initialData.createdAt,
+                    updatedAt: new Date().toISOString(),
+                }
+
+                nexusProductId = initialData.nexusProductId!
+                const result = await updateProjectToNexus(nexusProductId, projectForNexus, idToken)
+                if (!result.ok) {
+                    console.error("Nexus update failed:", result.error)
+                    throw new Error(result.error || "Nexus project update failed")
+                }
             }
 
             if (initialData) {

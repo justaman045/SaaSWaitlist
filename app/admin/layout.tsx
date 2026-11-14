@@ -45,6 +45,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     toast.success(`${result.deleted.length} project(s) removed from Nexus synced locally`)
                     router.refresh()
                 }
+                if (result.updated.length > 0) {
+                    toast.success(`${result.updated.length} project(s) updated from Nexus`)
+                    router.refresh()
+                }
                 if (result.errors.length > 0) {
                     result.errors.forEach((e) => toast.error(e))
                 }

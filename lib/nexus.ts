@@ -1,5 +1,7 @@
 import { Project } from "@/types"
 import { deleteProject } from "@/lib/db-service"
+import { db } from "@/lib/firebase"
+import { doc, updateDoc } from "firebase/firestore"
 
 const NEXUS_API_URL =
     process.env.NEXT_PUBLIC_NEXUS_API_URL ||
@@ -145,6 +147,82 @@ export async function deleteProductFromNexus(
 }
 
 /**
+ * Updates a product on nexusprods by its nexus product ID.
+ * Requires a Firebase ID token (Bearer) for admin authorization.
+ * Uses PUT to update all fields.
+ */
+export async function updateProjectToNexus(
+    nexusProductId: string,
+    project: Project,
+    idToken: string
+): Promise<NexusSyncResult> {
+    // Map local status to nexus status
+    const statusMap: Record<string, string> = {
+        active: "live",
+        coming_soon: "upcoming",
+    }
+
+    const price = Number(project.pricing)
+    const numericPrice = Number.isFinite(price) ? price : 0
+
+    const category = project.category || "General"
+
+    const body = {
+        name: project.title,
+        price: numericPrice,
+        category,
+        status: statusMap[project.status] || "upcoming",
+        description: project.shortDescription || project.description,
+        longDescription: project.description,
+        descriptionType: "plain",
+        imageUrl: project.imageUrl,
+        demoUrl: project.websiteUrl,
+        features: project.tags || [],
+    }
+
+    try {
+        const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify(body),
+        })
+
+        // 404 means product doesn't exist on nexus — caller should create it instead
+        if (response.status === 404) {
+            return { ok: false, error: "Product not found on nexus", status: 404 }
+        }
+
+        if (!response.ok) {
+            let errorMsg = `Nexus update failed (HTTP ${response.status})`
+            try {
+                const errorBody = await response.json()
+                errorMsg = errorBody?.error || errorBody?.message || errorMsg
+                if (process.env.NODE_ENV === "development" && errorBody?.details) {
+                    errorMsg += ` — ${errorBody.details}`
+                }
+            } catch {
+                // ignore parse errors
+            }
+            return { ok: false, error: errorMsg, status: response.status }
+        }
+
+        const data = await response.json()
+        return {
+            ok: true,
+            nexusId: data?.id ?? nexusProductId,
+        }
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : "Unknown nexus update error",
+        }
+    }
+}
+
+/**
  * Fetches all products from nexusprods.
  * Requires a Firebase ID token (Bearer) for admin authorization.
  */
@@ -183,37 +261,102 @@ export async function getAllNexusProducts(idToken: string): Promise<NexusProduct
  * that no longer exist on nexus (e.g. deleted directly on nexusprods).
  * Returns the list of deleted local project IDs.
  */
+/**
+ * Compares local projects against nexus products and:
+ * 1. Deletes local projects that no longer exist on nexus
+ * 2. Updates local projects whose fields differ from nexus
+ * Returns the list of deleted/updated local project IDs.
+ */
 export async function syncDeletionsFromNexus(
     localProjects: Project[],
     idToken: string
-): Promise<{ deleted: string[]; errors: string[] }> {
+): Promise<{ deleted: string[]; updated: string[]; errors: string[] }> {
     const deleted: string[] = []
+    const updated: string[] = []
     const errors: string[] = []
 
     try {
         const nexusProducts = await getAllNexusProducts(idToken)
-        const nexusIds = new Set(nexusProducts.map((p) => p.id))
+        const nexusMap = new Map(nexusProducts.map((p) => [p.id, p]))
+
+        // Nexus status → local status mapping
+        const nexusToLocalStatus: Record<string, string> = {
+            live: "active",
+            upcoming: "coming_soon",
+            draft: "coming_soon",
+            archived: "coming_soon",
+        }
 
         for (const project of localProjects) {
             if (!project.nexusProductId) continue
-            if (nexusIds.has(project.nexusProductId)) continue
+
+            const nexusProduct = nexusMap.get(project.nexusProductId)
 
             // Product exists locally but was deleted on nexus — delete locally too
-            try {
-                await deleteProject(project.id)
-                deleted.push(project.id)
-            } catch (error) {
-                errors.push(
-                    `Failed to delete local project ${project.id}: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`
-                )
+            if (!nexusProduct) {
+                try {
+                    await deleteProject(project.id)
+                    deleted.push(project.id)
+                } catch (error) {
+                    errors.push(
+                        `Failed to delete local project ${project.id}: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    )
+                }
+                continue
+            }
+
+            // Product exists on both sides — check if nexus has different fields
+            const localTags = project.tags ?? []
+            const nexusTags = (nexusProduct.features as string[]) ?? []
+
+            const localPricing = Number(project.pricing)
+            const nexusPrice = Number(nexusProduct.price)
+
+            const nexusProductAny = nexusProduct as any
+
+            const needsUpdate =
+                project.title !== nexusProduct.name ||
+                project.description !== nexusProduct.longDescription ||
+                project.shortDescription !== nexusProduct.description ||
+                project.slug !== nexusProductAny.slug ||
+                project.status !== nexusToLocalStatus[nexusProduct.status ?? ""] ||
+                project.imageUrl !== nexusProduct.imageUrl ||
+                project.websiteUrl !== nexusProduct.demoUrl ||
+                project.category !== nexusProduct.category ||
+                JSON.stringify([...localTags].sort()) !== JSON.stringify([...nexusTags].sort()) ||
+                localPricing !== nexusPrice
+
+            if (needsUpdate) {
+                try {
+                    await updateDoc(doc(db, "projects", project.id), {
+                        title: nexusProduct.name,
+                        description: nexusProduct.longDescription,
+                        shortDescription: nexusProduct.description,
+                        slug: nexusProductAny.slug,
+                        status: nexusToLocalStatus[nexusProduct.status ?? ""] ?? project.status,
+                        imageUrl: nexusProduct.imageUrl,
+                        websiteUrl: nexusProduct.demoUrl,
+                        category: nexusProduct.category,
+                        tags: nexusTags,
+                        pricing: String(nexusPrice),
+                        updatedAt: new Date().toISOString(),
+                    })
+                    updated.push(project.id)
+                } catch (error) {
+                    errors.push(
+                        `Failed to update local project ${project.id}: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    )
+                }
             }
         }
     } catch (error) {
         // Silent failure for fetch errors — nexusprods may be down or unreachable
-        console.log("Nexus deletion sync skipped:", error instanceof Error ? error.message : String(error))
+        console.log("Nexus sync skipped:", error instanceof Error ? error.message : String(error))
     }
 
-    return { deleted, errors }
+    return { deleted, updated, errors }
 }
