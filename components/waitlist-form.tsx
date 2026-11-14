@@ -37,6 +37,11 @@ export function WaitlistForm({ projectId }: { projectId: string }) {
                 createdAt: serverTimestamp(),
             })
 
+            // Save registration to localStorage for project page check
+            if (typeof window !== "undefined") {
+                localStorage.setItem(`saaswaitlist_waitlist_${projectId}`, email)
+            }
+
             toast.success("Successfully joined the waitlist!")
             setEmail("")
         } catch (error) {

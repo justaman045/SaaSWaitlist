@@ -36,10 +36,24 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - `export const revalidate = 60` (1-minute stale-while-revalidate, matching public pages).
 - Public reads on `projects` are allowed by `firestore.rules`, so no auth is required.
 
+## Waitlist Registration + Nexus Link
+
+- Waitlist signup (`components/waitlist-form.tsx`) saves the email to `localStorage` under key `saaswaitlist_waitlist_<projectId>` on successful signup.
+- Project detail page (`app/projects/[slug]/page.tsx`) uses `WaitlistStatus` (`components/waitlist-status.tsx`) which checks localStorage:
+  - Not registered → shows `WaitlistForm`
+  - Already registered → shows "You&apos;re already on the waitlist!" + `NexusLink` button
+- **`NexusLink`** (`components/nexus-link.tsx`) — button linking to the Nexus company website:
+  - Dev: `http://localhost:3001` (from `NEXT_PUBLIC_NEXUS_URL` or fallback)
+  - Production: `https://nexusprods.vercel.app`
+  - Shows "5% off subscription" badge
+- Add `NEXT_PUBLIC_NEXUS_URL` to `.env.local` to override the Nexus URL.
+
+
 ## Environment
 
 - Prerequisite: **Node 20+** (README). `npm run dev` may fail on older Node.
 - `.env*` is gitignored and there is **no `.env.example`**, despite the README telling you to `cp .env.example .env.local`. Create `.env.local` by hand.
+- `NEXT_PUBLIC_NEXUS_URL` — Nexus company website URL for waitlist discount link. Defaults to `http://localhost:3001` (dev) or `https://nexusprods.vercel.app` (prod).
 
 ## Dependencies / security
 

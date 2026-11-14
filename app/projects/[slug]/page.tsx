@@ -8,7 +8,7 @@ import rehypeRaw from "rehype-raw"
 import { formatDistanceToNow } from "date-fns"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { WaitlistForm } from "@/components/waitlist-form"
+import { WaitlistStatus } from "@/components/waitlist-status"
 
 export default async function ProjectPage({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
@@ -197,7 +197,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                         </div>
                                     )
                                 ) : (
-                                    <WaitlistForm projectId={project.id} />
+                                    <WaitlistStatus projectId={project.id} />
                                 )}
                             </div>
 
