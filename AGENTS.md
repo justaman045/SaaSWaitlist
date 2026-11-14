@@ -57,6 +57,12 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 - `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
 - Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
 
+## Nexus Delete Sync (Bidirectional)
+
+- **Local → Nexus:** Deleting a project in the admin edit form also deletes it from nexusprods via `DELETE http://localhost:3001/api/products/<nexusProductId>` (dev) or `DELETE https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod), using the same Bearer token auth. If nexus delete fails, the local delete is aborted.
+- **Nexus → Local (periodic):** `app/admin/layout.tsx` runs `syncDeletionsFromNexus()` every 5 minutes when the admin is signed in with a verified email. It fetches all products from nexusprods `GET /api/products` and deletes any local project whose `nexusProductId` no longer exists on nexus (e.g. deleted directly on nexusprods).
+- `lib/nexus.ts` exports: `syncProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`.
+
 ## Email Verification (Admin Access)
 
 - `app/admin/layout.tsx` — after sign-in, if `user.emailVerified === false`, shows a "Verify your email" banner with a **Resend Verification Link** button instead of the admin dashboard.
