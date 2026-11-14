@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore"
 import { db, auth } from "@/lib/firebase"
-import { syncProjectToNexus } from "@/lib/nexus"
+import { syncProjectToNexus, deleteProductFromNexus } from "@/lib/nexus"
 import ImageUpload from "@/components/ui/image-upload"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -177,6 +177,22 @@ export default function ProjectForm({ initialData }: ProjectFormProps) {
 
         setIsLoading(true)
         try {
+            // Get Firebase ID token for nexus admin authorization
+            const currentUser = auth.currentUser
+            if (!currentUser) {
+                throw new Error("Not authenticated. Please sign in again.")
+            }
+            const idToken = await currentUser.getIdToken()
+
+            // If project was synced to nexus, delete it there first
+            if (initialData.nexusProductId) {
+                const nexusResult = await deleteProductFromNexus(initialData.nexusProductId, idToken)
+                if (!nexusResult.ok) {
+                    console.error("Nexus delete failed:", nexusResult.error)
+                    throw new Error(nexusResult.error || "Failed to delete project from Nexus")
+                }
+            }
+
             // Import dynamically to avoid circular dependencies or use a direct import if safe
             // For now assuming deleteProject is available or we import it
             const { deleteProject } = await import("@/lib/db-service")

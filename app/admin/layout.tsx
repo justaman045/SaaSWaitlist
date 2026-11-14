@@ -6,14 +6,19 @@ import { onAuthStateChanged, sendEmailVerification, type User } from "firebase/a
 import { AdminLogin } from "@/components/admin-login"
 import { AlertCircle, LayoutDashboard, LogOut, Loader2, Mail } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { signOut } from "firebase/auth"
 import { toast } from "sonner"
+import { syncDeletionsFromNexus } from "@/lib/nexus"
+import { getProjects } from "@/lib/db-service"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null)
     const [loading, setLoading] = useState(true)
     const [resending, setResending] = useState(false)
+    const [syncing, setSyncing] = useState(false)
+    const router = useRouter()
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -22,6 +27,39 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })
         return () => unsubscribe()
     }, [])
+
+    // Periodic deletion sync: check every 5 minutes if any local projects
+    // were deleted on nexusprods and remove them locally too.
+    useEffect(() => {
+        if (!user || !user.emailVerified) return
+
+        const runSync = async () => {
+            setSyncing(true)
+            try {
+                const currentUser = auth.currentUser
+                if (!currentUser) return
+                const idToken = await currentUser.getIdToken()
+                const localProjects = await getProjects()
+                const result = await syncDeletionsFromNexus(localProjects, idToken)
+                if (result.deleted.length > 0) {
+                    toast.success(`${result.deleted.length} project(s) removed from Nexus synced locally`)
+                    router.refresh()
+                }
+                if (result.errors.length > 0) {
+                    result.errors.forEach((e) => toast.error(e))
+                }
+            } catch (error) {
+                console.error("Periodic Nexus deletion sync failed:", error)
+            } finally {
+                setSyncing(false)
+            }
+        }
+
+        runSync()
+        const intervalId: NodeJS.Timeout = setInterval(runSync, 5 * 60 * 1000) // every 5 minutes
+
+        return () => clearInterval(intervalId)
+    }, [user])
 
     const handleResendVerification = async () => {
         if (!user) return

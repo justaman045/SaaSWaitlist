@@ -1,6 +1,7 @@
 "use server"
 
 import { Project } from "@/types"
+import { deleteProject } from "@/lib/db-service"
 
 const NEXUS_API_URL =
     process.env.NEXT_PUBLIC_NEXUS_API_URL ||
@@ -18,6 +19,14 @@ export interface NexusSyncResult {
     error?: string
     status?: number
     productPageUrl?: string
+}
+
+export interface NexusProduct {
+    id: string
+    name: string
+    description?: string
+    status?: string
+    [key: string]: unknown
 }
 
 /**
@@ -94,4 +103,107 @@ export async function syncProjectToNexus(
             error: error instanceof Error ? error.message : "Unknown nexus sync error",
         }
     }
+}
+
+/**
+ * Deletes a product from nexusprods by its nexus product ID.
+ * Requires a Firebase ID token (Bearer) for admin authorization.
+ */
+export async function deleteProductFromNexus(
+    nexusProductId: string,
+    idToken: string
+): Promise<NexusSyncResult> {
+    try {
+        const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
+            method: "DELETE",
+            headers: {
+                Authorization: `Bearer ${idToken}`,
+            },
+        })
+
+        if (!response.ok) {
+            let errorMsg = `Nexus delete failed (HTTP ${response.status})`
+            try {
+                const errorBody = await response.json()
+                errorMsg = errorBody?.error || errorBody?.message || errorMsg
+            } catch {
+                // ignore parse errors
+            }
+            return { ok: false, error: errorMsg, status: response.status }
+        }
+
+        return { ok: true }
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : "Unknown nexus delete error",
+        }
+    }
+}
+
+/**
+ * Fetches all products from nexusprods.
+ * Requires a Firebase ID token (Bearer) for admin authorization.
+ */
+export async function getAllNexusProducts(idToken: string): Promise<NexusProduct[]> {
+    try {
+        const response = await fetch(NEXUS_API_URL, {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${idToken}`,
+            },
+        })
+
+        if (!response.ok) {
+            throw new Error(`Nexus fetch failed (HTTP ${response.status})`)
+        }
+
+        const data = await response.json()
+        return data?.products ?? []
+    } catch (error) {
+        throw error instanceof Error ? error : new Error("Unknown nexus fetch error")
+    }
+}
+
+/**
+ * Compares local projects against nexus products and deletes local projects
+ * that no longer exist on nexus (e.g. deleted directly on nexusprods).
+ * Returns the list of deleted local project IDs.
+ */
+export async function syncDeletionsFromNexus(
+    localProjects: Project[],
+    idToken: string
+): Promise<{ deleted: string[]; errors: string[] }> {
+    const deleted: string[] = []
+    const errors: string[] = []
+
+    try {
+        const nexusProducts = await getAllNexusProducts(idToken)
+        const nexusIds = new Set(nexusProducts.map((p) => p.id))
+
+        for (const project of localProjects) {
+            if (!project.nexusProductId) continue
+            if (nexusIds.has(project.nexusProductId)) continue
+
+            // Product exists locally but was deleted on nexus — delete locally too
+            try {
+                await deleteProject(project.id)
+                deleted.push(project.id)
+            } catch (error) {
+                errors.push(
+                    `Failed to delete local project ${project.id}: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                )
+            }
+        }
+    } catch (error) {
+        errors.push(
+            `Failed to fetch nexus products: ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        )
+    }
+
+    return { deleted, errors }
 }
