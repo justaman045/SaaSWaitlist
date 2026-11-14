@@ -61,7 +61,7 @@ Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. 
 
 - **Local → Nexus:** Deleting a project in the admin edit form also deletes it from nexusprods via `DELETE http://localhost:3001/api/products/<nexusProductId>` (dev) or `DELETE https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod), using the same Bearer token auth. If nexus delete fails, the local delete is aborted.
 - **Nexus → Local (periodic):** `app/admin/layout.tsx` runs `syncDeletionsFromNexus()` every 5 minutes when the admin is signed in with a verified email. It fetches all products from nexusprods `GET /api/products` and deletes any local project whose `nexusProductId` no longer exists on nexus (e.g. deleted directly on nexusprods).
-- `lib/nexus.ts` exports: `syncProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`.
+- `lib/nexus.ts` exports: `syncProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`. Runs on the client (no `"use server"`) so Firestore deletes use the authenticated user's context.
 
 ## Email Verification (Admin Access)
 
