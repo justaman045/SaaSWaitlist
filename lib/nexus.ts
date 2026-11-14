@@ -1,5 +1,3 @@
-"use server"
-
 import { Project } from "@/types"
 import { deleteProject } from "@/lib/db-service"
 
