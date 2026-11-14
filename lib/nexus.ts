@@ -58,7 +58,7 @@ export async function syncProjectToNexus(
         description: project.shortDescription || project.description,
         longDescription: project.description,
         descriptionType: "plain",
-        imageUrl: project.imageUrl,
+        imageUrl: project.imageUrl || project.images?.[0] || "",
         demoUrl: project.websiteUrl,
         features: project.tags || [],
     }
@@ -175,7 +175,7 @@ export async function updateProjectToNexus(
         description: project.shortDescription || project.description,
         longDescription: project.description,
         descriptionType: "plain",
-        imageUrl: project.imageUrl,
+        imageUrl: project.imageUrl || project.images?.[0] || "",
         demoUrl: project.websiteUrl,
         features: project.tags || [],
     }
