@@ -64,6 +64,8 @@ export async function syncProjectToNexus(
     }
 
     try {
+        console.log(`[Nexus Sync] POST ${NEXUS_API_URL}`, { body, hasAuth: !!idToken })
+
         const response = await fetch(NEXUS_API_URL, {
             method: "POST",
             headers: {
@@ -72,6 +74,8 @@ export async function syncProjectToNexus(
             },
             body: JSON.stringify(body),
         })
+
+        console.log(`[Nexus Sync] POST ${NEXUS_API_URL} -> ${response.status}`, response.ok ? "success" : "failed")
 
         if (!response.ok) {
             let errorMsg = `Nexus create failed (HTTP ${response.status})`
@@ -114,12 +118,16 @@ export async function deleteProductFromNexus(
     idToken: string
 ): Promise<NexusSyncResult> {
     try {
+        console.log(`[Nexus Sync] DELETE ${NEXUS_API_URL}/${nexusProductId}`, { hasAuth: !!idToken })
+
         const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
             method: "DELETE",
             headers: {
                 Authorization: `Bearer ${idToken}`,
             },
         })
+
+        console.log(`[Nexus Sync] DELETE ${NEXUS_API_URL}/${nexusProductId} -> ${response.status}`, response.ok ? "success" : "failed")
 
         // 404 means product already deleted on nexus — treat as success
         if (response.status === 404) {
@@ -181,6 +189,8 @@ export async function updateProjectToNexus(
     }
 
     try {
+        console.log(`[Nexus Sync] PUT ${NEXUS_API_URL}/${nexusProductId}`, { body, hasAuth: !!idToken })
+
         const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
             method: "PUT",
             headers: {
@@ -189,6 +199,8 @@ export async function updateProjectToNexus(
             },
             body: JSON.stringify(body),
         })
+
+        console.log(`[Nexus Sync] PUT ${NEXUS_API_URL}/${nexusProductId} -> ${response.status}`, response.ok ? "success" : "failed")
 
         // 404 means product doesn't exist on nexus — caller should create it instead
         if (response.status === 404) {
@@ -231,6 +243,8 @@ export async function getAllNexusProducts(idToken: string): Promise<NexusProduct
     const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
     try {
+        console.log(`[Nexus Sync] GET ${NEXUS_API_URL}`, { hasAuth: !!idToken })
+
         const response = await fetch(NEXUS_API_URL, {
             method: "GET",
             headers: {
@@ -240,6 +254,7 @@ export async function getAllNexusProducts(idToken: string): Promise<NexusProduct
         })
 
         clearTimeout(timeoutId)
+        console.log(`[Nexus Sync] GET ${NEXUS_API_URL} -> ${response.status}`, response.ok ? "success" : "failed")
 
         if (!response.ok) {
             throw new Error(`Nexus fetch failed (HTTP ${response.status})`)
