@@ -149,13 +149,19 @@ export async function deleteProductFromNexus(
  * Requires a Firebase ID token (Bearer) for admin authorization.
  */
 export async function getAllNexusProducts(idToken: string): Promise<NexusProduct[]> {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+
     try {
         const response = await fetch(NEXUS_API_URL, {
             method: "GET",
             headers: {
                 Authorization: `Bearer ${idToken}`,
             },
+            signal: controller.signal,
         })
+
+        clearTimeout(timeoutId)
 
         if (!response.ok) {
             throw new Error(`Nexus fetch failed (HTTP ${response.status})`)
@@ -164,6 +170,10 @@ export async function getAllNexusProducts(idToken: string): Promise<NexusProduct
         const data = await response.json()
         return data?.products ?? []
     } catch (error) {
+        clearTimeout(timeoutId)
+        if (error instanceof DOMException && error.name === "AbortError") {
+            throw new Error("Nexus fetch timed out — is nexusprods running on localhost:3001?")
+        }
         throw error instanceof Error ? error : new Error("Unknown nexus fetch error")
     }
 }
@@ -201,11 +211,8 @@ export async function syncDeletionsFromNexus(
             }
         }
     } catch (error) {
-        errors.push(
-            `Failed to fetch nexus products: ${
-                error instanceof Error ? error.message : String(error)
-            }`
-        )
+        // Silent failure for fetch errors — nexusprods may be down or unreachable
+        console.error("Nexus deletion sync skipped:", error instanceof Error ? error.message : String(error))
     }
 
     return { deleted, errors }
