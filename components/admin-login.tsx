@@ -1,13 +1,22 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth"
+import {
+    signInWithEmailAndPassword,
+    signInWithPopup,
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    type User,
+} from "firebase/auth"
 import { auth } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import { Mail } from "lucide-react"
+
+const googleProvider = new GoogleAuthProvider()
 
 export function AdminLogin() {
     const [email, setEmail] = useState("")
@@ -35,6 +44,20 @@ export function AdminLogin() {
         } catch (error) {
             console.error("Login error:", error)
             toast.error("Invalid credentials")
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleGoogleLogin = async () => {
+        setIsLoading(true)
+        try {
+            await signInWithPopup(auth, googleProvider)
+            toast.success("Signed in with Google!")
+            router.push("/admin")
+        } catch (error) {
+            console.error("Google login error:", error)
+            toast.error("Google sign-in failed")
         } finally {
             setIsLoading(false)
         }
@@ -95,6 +118,24 @@ export function AdminLogin() {
                             {isLoading ? "Signing in..." : "Sign in"}
                         </Button>
                     </form>
+                    <div className="mt-6">
+                        <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t border-white/10"></span>
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-[#0A0A0A] px-2 text-muted-foreground">Or continue with</span>
+                            </div>
+                        </div>
+                        <Button
+                            onClick={handleGoogleLogin}
+                            disabled={isLoading}
+                            className="w-full h-12 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 text-sm font-medium text-muted-foreground transition-colors"
+                        >
+                            <Mail className="h-4 w-4" />
+                            Sign in with Google
+                        </Button>
+                    </div>
                 </CardContent>
             </Card>
         </div>
