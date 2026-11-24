@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { FIREBASE_TARGET } from "@/lib/firebase-target";
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "mock-key",
@@ -14,5 +15,30 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
+
+/**
+ * Points the SDK at the local Firebase emulators.
+ *
+ * Set `NEXT_PUBLIC_FIREBASE_EMULATOR=true` to run the app against the
+ * emulator instead of production. The emulators accept the same rules as
+ * the live project, which makes it possible to exercise the admin flows
+ * (sign-in, read, delete) without touching real data.
+ */
+export { FIREBASE_TARGET }
+
+if (FIREBASE_TARGET === "emulator") {
+    connectFirestoreEmulator(db, "127.0.0.1", 8099);
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
+
+/**
+ * The Firebase project this build talks to.
+ *
+ * Surfaced in the admin UI because "which project am I signing in to?" is
+ * the question behind most confusing auth failures: the same email can
+ * exist in several projects, and a credential that works in one does not
+ * work in the other.
+ */
+export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 
 export { app, db, auth };

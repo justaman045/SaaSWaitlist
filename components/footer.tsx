@@ -1,4 +1,6 @@
+import Link from "next/link"
 import { Rocket } from "lucide-react"
+import { CopyrightYear } from "@/components/copyright-year"
 
 export function Footer() {
     return (
@@ -15,14 +17,15 @@ export function Footer() {
                 </div>
 
                 <div className="flex gap-8 text-sm text-muted-foreground">
-                    <a href="/privacy" className="hover:text-foreground transition-colors">Privacy</a>
-                    <a href="/terms" className="hover:text-foreground transition-colors">Terms</a>
+                    <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+                    <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
                     <a href="https://x.com/justaman045" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Twitter</a>
                     <a href="https://github.com/justaman045" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">GitHub</a>
                 </div>
             </div>
             <div className="container mt-8 border-t border-border/40 pt-8 text-center text-xs text-muted-foreground">
-                © {new Date().getFullYear()} SaaS Waitlist. All rights reserved. Built by Aman.
+                © <CopyrightYear initialYear={new Date().getFullYear()} /> SaaS Waitlist. All
+                rights reserved. Built by Aman.
             </div>
         </footer>
     )

@@ -10,28 +10,27 @@ import { Badge } from "@/components/ui/badge"
 import { CalendarDays, Users, ArrowUpRight } from "lucide-react"
 import { Project } from "@/types"
 import { formatDistanceToNow } from "date-fns"
+import { ProjectPreview } from "@/components/project-preview"
+
+function timeAgo(value?: string): string | null {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return formatDistanceToNow(date, { addSuffix: true })
+}
 
 export function ProjectCard({ project }: { project: Project }) {
+    const imageSrc = project.imageUrl || project.images?.[0]
+    const createdAt = timeAgo(project.createdAt)
+    // Legacy documents can be missing a slug — linking to `/projects/undefined`
+    // would render a 404, so the button is disabled instead.
+    const hasSlug = Boolean(project.slug)
+
     return (
         <Card className="group relative flex flex-col overflow-hidden rounded-3xl border-white/10 bg-white/5 backdrop-blur-md transition-all duration-300 hover:border-primary/20 hover:bg-white/10 hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1">
             <CardHeader className="p-0">
                 <div className="aspect-[16/9] w-full bg-gradient-to-br from-white/5 to-white/0 flex items-center justify-center relative overflow-hidden group-hover:scale-105 transition-transform duration-500">
-                    {/* Render Image if available, otherwise show abstract pattern */}
-                    {project.imageUrl || (project.images && project.images.length > 0) ? (
-                        <img
-                            src={project.imageUrl || project.images?.[0]}
-                            alt={`${project.title} preview`}
-                            className="w-full h-full object-cover"
-                        />
-                    ) : (
-                        <>
-                            <div className="absolute inset-0 bg-grid-small-white/5 [mask-image:linear-gradient(to_bottom,transparent,black)]"></div>
-                            <div className="z-10 flex flex-col items-center gap-2">
-                                <span className="text-4xl font-bold opacity-10 tracking-widest uppercase">{(project.title || "??").substring(0, 2)}</span>
-                                <span className="text-sm font-medium text-muted-foreground/50">Project Preview</span>
-                            </div>
-                        </>
-                    )}
+                    <ProjectPreview imageSrc={imageSrc} title={project.title} />
 
                     <Badge
                         variant={project.status === "active" ? "default" : "secondary"}
@@ -57,7 +56,7 @@ export function ProjectCard({ project }: { project: Project }) {
                 <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1.5">
                         <CalendarDays className="h-3.5 w-3.5" />
-                        <span>{formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })}</span>
+                        <span>{createdAt ?? "Recently added"}</span>
                     </div>
                     {project.waitlistCount !== undefined && (
                         <div className="flex items-center gap-1.5 text-primary/80">
@@ -67,16 +66,16 @@ export function ProjectCard({ project }: { project: Project }) {
                     )}
                 </div>
 
-                {project.status === "active" ? (
-                    <Link href={`/projects/${project.slug}`}>
-                        <Button size="sm" className="bg-secondary text-secondary-foreground group-hover:bg-primary group-hover:text-primary-foreground hover:bg-secondary/80 hover:text-secondary-foreground rounded-full px-4 h-8 transition-colors">
+                {project.status === "active" && hasSlug ? (
+                    <Button asChild size="sm" className="bg-secondary text-secondary-foreground group-hover:bg-primary group-hover:text-primary-foreground hover:bg-secondary/80 hover:text-secondary-foreground rounded-full px-4 h-8 transition-colors">
+                        <Link href={`/projects/${project.slug}`}>
                             View
                             <ArrowUpRight className="ml-1 h-3 w-3" />
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 ) : (
                     <Button size="sm" disabled className="bg-muted text-muted-foreground border border-muted/40 rounded-full px-4 h-8 transition-colors">
-                        Coming Soon
+                        {project.status === "active" ? "Unavailable" : "Coming Soon"}
                     </Button>
                 )}
             </CardFooter>

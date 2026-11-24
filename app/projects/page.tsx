@@ -1,10 +1,11 @@
 import { ProjectCard } from "@/components/project-card"
-import { getProjects } from "@/lib/db-service"
+import { CatalogueUnavailable } from "@/components/catalogue-unavailable"
+import { getProjectsForPage } from "@/lib/db-service.server"
 
 export const revalidate = 60; // Revalidate every minute
 
 export default async function ProjectsPage() {
-  const allProjects = await getProjects()
+  const { projects: allProjects, error } = await getProjectsForPage()
 
   return (
     <div className="flex flex-col pb-10">
@@ -17,16 +18,22 @@ export default async function ProjectsPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-            {allProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
+          {error ? (
+            <CatalogueUnavailable detail={error} />
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+                {allProjects.map((project) => (
+                  <ProjectCard key={project.id} project={project} />
+                ))}
+              </div>
 
-          {allProjects.length === 0 && (
-            <div className="text-center py-20 text-muted-foreground">
-              No projects available yet.
-            </div>
+              {allProjects.length === 0 && (
+                <div className="text-center py-20 text-muted-foreground">
+                  No projects available yet.
+                </div>
+              )}
+            </>
           )}
         </div>
       </section>

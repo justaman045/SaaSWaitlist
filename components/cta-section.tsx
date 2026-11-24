@@ -13,14 +13,12 @@ export function CTASection() {
                 <p className="mx-auto mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
                     Join hundreds of other founders who are building in public and gathering early users with SaaS Waitlist.
                 </p>
-                <div className="mt-10 flex items-center justify-center gap-x-6">
-                    <Link href="/admin/new">
-                        <Button size="lg" className="rounded-full px-8 font-semibold">
-                            Submit Your Project
-                        </Button>
-                    </Link>
-                    <Link href="#projects" className="text-sm font-semibold leading-6 text-white hover:text-primary transition-colors">
-                        Browse Projects <span aria-hidden="true">→</span>
+                <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+                    <Button asChild size="lg" className="rounded-full px-8 font-semibold">
+                        <Link href="/request">Submit Your Project</Link>
+                    </Button>
+                    <Link href="/projects" className="rounded-full border border-white/15 px-8 py-3 text-sm font-semibold text-white hover:border-primary/40 hover:text-primary transition-colors">
+                        Browse Projects
                     </Link>
                 </div>
                 <svg

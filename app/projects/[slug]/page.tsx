@@ -1,23 +1,124 @@
-import { getProjectBySlug } from "@/lib/db-service"
+import { getProjectForPage } from "@/lib/db-service.server"
+import { isNumericPrice } from "@/lib/price"
 import { notFound } from "next/navigation"
+import type { Metadata } from "next"
 import { Badge } from "@/components/ui/badge"
-import { CalendarDays, Users, ExternalLink, ArrowLeft } from "lucide-react"
+import { CalendarDays, Users, ExternalLink, ArrowLeft, MessageSquarePlus } from "lucide-react"
 import { ImageGallery } from "@/components/image-gallery"
 import ReactMarkdown from "react-markdown"
-import rehypeRaw from "rehype-raw"
 import { formatDistanceToNow } from "date-fns"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { WaitlistStatus } from "@/components/waitlist-status"
 import { NexusLink } from "@/components/nexus-link"
+import { getNexusProductUrl } from "@/lib/nexus-url"
 
-export default async function ProjectPage({ params }: { params: Promise<{ slug: string }> }) {
+export const revalidate = 60
+
+/**
+ * Slugs only become known at runtime, so no paths are prerendered. Returning
+ * an empty array still opts the route into ISR: every requested slug is
+ * rendered on demand and then cached for `revalidate` seconds.
+ */
+export async function generateStaticParams() {
+    return []
+}
+
+function timeAgo(value?: string): string | null {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return formatDistanceToNow(date, { addSuffix: true })
+}
+
+function getHostname(url?: string): string | null {
+    if (!url) return null
+    try {
+        return new URL(url).hostname
+    } catch {
+        return null
+    }
+}
+
+function formatLaunchDate(value?: string): string | null {
+    if (!value) return null
+    const date = new Date(`${value}T00:00:00`)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+    })
+}
+
+interface ProjectPageProps {
+    params: Promise<{ slug: string }>
+}
+
+export async function generateMetadata({ params }: ProjectPageProps): Promise<Metadata> {
+    const { slug } = await params
+    const { project, error } = await getProjectForPage(slug)
+
+    if (error) {
+        // The catalogue could not be read. A generic title is better than
+        // pretending the project does not exist.
+        return { title: "Project — SaaS Waitlist" }
+    }
+
+    if (!project) {
+        return { title: "Project not found — SaaS Waitlist" }
+    }
+
+    const description = (project.shortDescription || project.description || "").slice(0, 160)
+
+    return {
+        title: `${project.title} — SaaS Waitlist`,
+        description,
+        openGraph: {
+            title: project.title,
+            description,
+            images: project.imageUrl ? [{ url: project.imageUrl }] : undefined,
+        },
+    }
+}
+
+export default async function ProjectPage({ params }: ProjectPageProps) {
     const { slug } = await params;
-    const project = await getProjectBySlug(slug)
+    const { project, error } = await getProjectForPage(slug)
+
+    if (error) {
+        // A failed read must not be turned into a 404 — that would tell a
+        // visitor that a live project does not exist. Throwing renders the
+        // error boundary instead, which offers a retry.
+        throw new Error(`Could not load the project "${slug}": ${error}`)
+    }
 
     if (!project) {
         notFound()
     }
+
+    const hostname = getHostname(project.websiteUrl)
+    const launcherLabel = project.launchDate
+        ? `Launches ${formatLaunchDate(project.launchDate)}`
+        : timeAgo(project.createdAt)
+            ? `Added ${timeAgo(project.createdAt)}`
+            : null
+    const galleryImages = Array.from(
+        new Set([project.imageUrl, ...(project.images || [])].filter(Boolean) as string[])
+    )
+
+    // React keys for the feature list. The features come from free text, so
+    // two entries can be identical — the duplicate gets a counter suffix
+    // instead of relying on the array index.
+    const featureKeys = new Map<string, number>()
+    const features = (project.features ?? []).map((feature) => {
+        const occurrence = featureKeys.get(feature) ?? 0
+        featureKeys.set(feature, occurrence + 1)
+        return {
+            text: feature,
+            key: occurrence === 0 ? feature : `${feature}#${occurrence}`,
+        }
+    })
 
     return (
         <div className="min-h-screen bg-zinc-950 text-slate-50 relative overflow-hidden">
@@ -58,10 +159,18 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 </Badge>
                             </div>
                             <div className="flex flex-wrap items-center gap-4 text-sm mt-3">
-                                <div className="flex items-center gap-2.5 bg-white/5 backdrop-blur-lg px-4 py-2 rounded-full border border-white/10 shadow-lg shadow-black/20 text-slate-300">
-                                    <CalendarDays className="h-4 w-4 text-indigo-400" />
-                                    <span>Launched {formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })}</span>
-                                </div>
+                                {launcherLabel && (
+                                    <div className="flex items-center gap-2.5 bg-white/5 backdrop-blur-lg px-4 py-2 rounded-full border border-white/10 shadow-lg shadow-black/20 text-slate-300">
+                                        <CalendarDays className="h-4 w-4 text-indigo-400" />
+                                        <span>{launcherLabel}</span>
+                                    </div>
+                                )}
+                                {project.pricing && (
+                                    <div className="flex items-center gap-2.5 bg-white/5 backdrop-blur-lg px-4 py-2 rounded-full border border-white/10 shadow-lg shadow-black/20 text-slate-300">
+                                        {isNumericPrice(project.pricing) && <span className="text-indigo-400">$</span>}
+                                        <span>{project.pricing}</span>
+                                    </div>
+                                )}
                                 {project.waitlistCount !== undefined && (
                                     <div className="flex items-center gap-2.5 bg-white/5 backdrop-blur-lg px-4 py-2 rounded-full border border-white/10 shadow-lg shadow-black/20 text-slate-300">
                                         <Users className="h-4 w-4 text-pink-400" />
@@ -82,7 +191,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 <div className="w-3.5 h-3.5 rounded-full bg-yellow-500/80 shadow-[0_0_8px_rgba(234,179,8,0.5)]"></div>
                                 <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/80 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
                                 <div className="ml-4 flex-1 h-7 bg-white/5 rounded-full border border-white/10 flex items-center justify-center px-4 text-[11px] text-slate-400 font-mono tracking-wide">
-                                    {project.websiteUrl ? new URL(project.websiteUrl).hostname : `${project.slug}.saaswaitlist.com`}
+                                    {hostname || project.title}
                                 </div>
                                 <div className="w-[54px]"></div>{/* Balance flex spacer */}
                             </div>
@@ -91,7 +200,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 {project.imageUrl || (project.images && project.images.length > 0) ? (
                                     <div className="absolute inset-0">
                                         <ImageGallery
-                                            images={Array.from(new Set([project.imageUrl, ...(project.images || [])].filter(Boolean) as string[]))}
+                                            images={galleryImages}
                                             title={project.title}
                                         />
                                     </div>
@@ -140,13 +249,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                             prose-code:text-indigo-300 prose-code:bg-indigo-500/10 prose-code:px-2 prose-code:py-1 prose-code:rounded-lg prose-code:before:content-none prose-code:after:content-none prose-code:border prose-code:border-indigo-500/20
                                             prose-img:rounded-2xl prose-img:shadow-2xl prose-img:border prose-img:border-white/10"
                                 >
-                                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>{project.description}</ReactMarkdown>
+                                    <ReactMarkdown>{project.description ?? ""}</ReactMarkdown>
                                 </div>
                             </div>
                         </div>
 
                         {/* Premium Bento Grid Features */}
-                        {project.features && project.features.length > 0 && (
+                        {features.length > 0 && (
                             <div className="relative rounded-[2.5rem] border border-white/[0.08] bg-zinc-900/40 p-8 md:p-12 lg:p-16 backdrop-blur-2xl shadow-2xl overflow-hidden ring-1 ring-white/5 mt-4">
                                 <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-bl from-purple-500/10 to-transparent rounded-full blur-[120px] -z-10 pointer-events-none"></div>
                                 <h3 className="mb-12 text-3xl lg:text-4xl font-extrabold text-white flex items-center gap-5 drop-shadow-md">
@@ -156,12 +265,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                     Key Features
                                 </h3>
                                 <ul className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {project.features.map((feature: string, i: number) => (
-                                        <li key={i} className="group relative p-8 rounded-3xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] hover:border-white/20 transition-all duration-500 hover:-translate-y-1 shadow-lg hover:shadow-2xl hover:shadow-indigo-500/10 cursor-default overflow-hidden">
+                                    {features.map((feature) => (
+                                        <li key={feature.key} className="group relative p-8 rounded-3xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] hover:border-white/20 transition-all duration-500 hover:-translate-y-1 shadow-lg hover:shadow-2xl hover:shadow-indigo-500/10 cursor-default overflow-hidden">
                                             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                                             <div className="relative z-10 flex items-start gap-5">
                                                 <div className="mt-1.5 h-3 w-3 rounded-full bg-gradient-to-r from-indigo-400 to-purple-400 shrink-0 shadow-[0_0_15px_rgba(129,140,248,0.8)] group-hover:scale-125 transition-transform duration-500" />
-                                                <span className="text-lg text-zinc-300 group-hover:text-white leading-relaxed transition-colors duration-300 font-medium">{feature}</span>
+                                                <span className="text-lg text-zinc-300 group-hover:text-white leading-relaxed transition-colors duration-300 font-medium">{feature.text}</span>
                                             </div>
                                         </li>
                                     ))}
@@ -192,7 +301,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                             <div className="group/btn relative">
                                                 <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[1.25rem] blur opacity-60 group-hover/btn:opacity-100 transition duration-500"></div>
                                                 <Button asChild variant="outline" size="lg" className="relative w-full rounded-[1.25rem] h-14 border border-white/10 shadow-xl transition-all duration-300">
-                                                    <a href={`https://nexusprods.vercel.app/products/${project.nexusProductId}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-3 text-lg font-medium">
+                                                    <a href={getNexusProductUrl(project.nexusProductId)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-3 text-lg font-medium">
                                                         Open on Nexus
                                                         <ExternalLink className="h-5 w-5" />
                                                     </a>
@@ -216,6 +325,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 )}
                             </div>
 
+                            <Link
+                                href={`/request?project=${encodeURIComponent(project.slug)}`}
+                                className="mt-6 inline-flex items-center justify-center gap-2 text-sm text-zinc-400 transition-colors hover:text-primary"
+                            >
+                                <MessageSquarePlus className="h-4 w-4" />
+                                Request a feature for this tool
+                            </Link>
+
                             {project.category && (
                                 <div className="mt-10 pt-8 border-t border-white/[0.08]">
                                     <div className="text-sm font-semibold text-zinc-500 uppercase tracking-widest mb-4">Category</div>
@@ -229,8 +346,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 <div className="mt-8">
                                     <div className="text-sm font-semibold text-zinc-500 uppercase tracking-widest mb-4">Tags</div>
                                     <div className="flex flex-wrap gap-2.5">
-                                        {project.tags.map((tag: string) => (
-                                            <Badge key={tag} variant="outline" className="rounded-xl px-4 py-1.5 border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.05] hover:text-white transition-all text-sm font-medium">
+                                        {project.tags.map((tag: string, tagIndex: number) => (
+                                            <Badge key={`${tag}-${tagIndex}`} variant="outline" className="rounded-xl px-4 py-1.5 border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.05] hover:text-white transition-all text-sm font-medium">
                                                 {tag}
                                             </Badge>
                                         ))}
@@ -242,8 +359,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
                                 <div className="mt-8">
                                     <div className="text-sm font-semibold text-zinc-500 uppercase tracking-widest mb-4">Tech Stack</div>
                                     <div className="flex flex-wrap gap-2.5">
-                                        {project.techStack.map((tech: string) => (
-                                            <Badge key={tech} variant="secondary" className="rounded-xl px-4 py-1.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors shadow-inner text-sm font-medium">
+                                        {project.techStack.map((tech: string, techIndex: number) => (
+                                            <Badge key={`${tech}-${techIndex}`} variant="secondary" className="rounded-xl px-4 py-1.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors shadow-inner text-sm font-medium">
                                                 <span className="opacity-70 mr-1.5">⚡</span> {tech}
                                             </Badge>
                                         ))}

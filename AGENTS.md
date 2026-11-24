@@ -1,107 +1,155 @@
 # AGENTS.md
 
-Single Next.js 16 App Router app (React 19, TypeScript strict). Not a monorepo. No packages/workspaces.
+Single Next.js 16 App Router app (React 19, strict TS). Not a monorepo — no packages/workspaces.
 
 ## Commands
 
-- `npm run dev` / `npm run build` / `npm start`
-- `npm run lint` — runs bare `eslint` (flat config `eslint.config.mjs`), NOT `next lint`. No args/fix flags configured.
-- Typecheck: `npx tsc --noEmit` (no `typecheck` script exists).
-- There are **no tests** and **no CI**. Do not invent test commands or frameworks.
+- `npm run dev` / `npm run build` / `npm start`.
+- `npm run lint` runs bare `eslint` (flat config `eslint.config.mjs`), **not** `next lint`; no fix flag configured.
+- Typecheck: `npx tsc --noEmit` (no `typecheck` script). There are **no tests and no CI** — don't invent test commands or frameworks.
 
-## Stack notes / gotchas
+## Toolchain quirks
 
-- **Tailwind is v4** (`tailwindcss@^4` + `@tailwindcss/postcss`). `app/globals.css` starts with `@import "tailwindcss"; @import "tw-animate-css"; @config "../tailwind.config.ts"; @plugin "@tailwindcss/typography";`. Theme tokens are in `tailwind.config.ts` (loaded via `@config`), CSS vars in `app/globals.css`. Dark mode is class-based via `@custom-variant dark (&:is(.dark *));`. Animations come from `tw-animate-css` (NOT the old `tailwindcss-animate`, which is v3-only). `components.json` is shadcn/ui (new-york, RSC, neutral).
-- Path alias `@/*` maps to repo root (not `src/`).
-- `next.config.ts` restricts `next/image` to `res.cloudinary.com` and `images.unsplash.com`; add hostnames there before using new remote images.
+- Tailwind v4: `app/globals.css` imports `tailwindcss` + `tw-animate-css` and loads `tailwind.config.ts` via `@config` (not auto-discovered). Dark mode is class-based; animations come from `tw-animate-css`, not `tailwindcss-animate`.
+- **The site is dark-only.** There is no theme toggle and **no `localStorage` reads** for the theme — `components/theme-provider.tsx` only sets `class="dark"` and `color-scheme: dark`, and `app/layout.tsx` runs a tiny inline script before paint so there is no flash. Do not reintroduce a light palette: the marketing headings are white-on-white by design.
+- **Inter is self-hosted, not fetched from Google.** `app/layout.tsx` uses `next/font/local` against the committed variable subsets in `fonts/` (`Inter-Variable-latin.woff2`, `Inter-Variable-latin-ext.woff2`). Do not switch back to `next/font/google`: a flaky network makes it download fail, and the build then silently falls back to a system font. Inter is SIL OFL 1.1 — the license ships as `fonts/Inter-LICENSE.txt` and all three files must stay committed.
+- `@/*` maps to the repo root (not `src/`).
+- `package.json` has `"type": "module"` (there are no `.js`/`.cjs` files) — without it Next logs a `MODULE_TYPELESS_PACKAGE_JSON` warning on every build.
+- `next.config.ts` permits remote `next/image` hosts only from `res.cloudinary.com` and `images.unsplash.com`. The list lives in `lib/images.ts` (`ALLOWED_IMAGE_HOSTS`) and is read by both the config and `components/project-card.tsx` — edit it there, never in one place only. Arbitrary admin-supplied hosts fall back to a plain `<img>`.
 
 ## Firebase / data
 
-- Only the **client** Firebase SDK is used (`lib/firebase.ts`), even for server components. `firebase-admin` was removed from `package.json` (it was an unused dependency); don't reintroduce it or `FIREBASE_SERVICE_ACCOUNT`.
-- `lib/firebase.ts` falls back to mock config when `NEXT_PUBLIC_FIREBASE_*` is unset, so dev/build succeeds without credentials but Firestore reads silently return empty (`getProjects` swallows errors and returns `[]`).
-- Public pages fetch Firestore from RSC at build/revalidate time; `app/page.tsx` and `app/projects/page.tsx` set `export const revalidate = 60`, `app/admin/page.tsx` is `dynamic = 'force-dynamic'`. Firestore rules must allow public reads for these to populate.
-- `getProjects` filters **in memory** after fetching all docs — no composite indexes needed, and adding a Firestore query/index won't change filtering behavior. `getProjects` also populates `waitlistCount` per project by counting waitlist docs. `getProjectBySlug` filters by `status === "active"` so coming_soon projects aren't publicly accessible via direct URL. `components/project-card.tsx` renders a disabled "Coming Soon" button instead of a clickable "View" link for coming_soon projects, preventing users from navigating to their detail pages.
-- Admin access is client-side only (`onAuthStateChanged` in `app/admin/layout.tsx`); it is not a server-side security boundary. Firestore security rules live in `firestore.rules` — deployed to Firebase project `company-24267` (shared with nexusprods). Rules use `isAdmin()` (email in allowlist + email_verified == true) for writes. Waitlist writes use a composite document ID (`${projectId}_${email}`) to prevent duplicates at the database level.
-## Cloudinary uploads
+- **Two Firebase projects are in play — do not mix them up.** `company-24267` is what this repo is configured against (`.firebaserc`, `.env.local`) and it is **shared with nexusprods**; `saaswaitlist-7280f` is the project's *previous* Firebase project and still holds the original catalogue data and is what the currently deployed Vercel build points at. `NEXT_PUBLIC_FIREBASE_PROJECT_ID` picks the local one, the Vercel env vars pick the deployed one — if they disagree the local app and the live site read different data and the same credential works in one and fails in the other. The admin sign-in form prints the project id and target (`production` / `local emulator`) for exactly this reason (`FIREBASE_PROJECT_ID`, `FIREBASE_TARGET` in `lib/firebase.ts`).
+- **The catalogue migration is still pending.** As of 2026-11-23 `company-24267` holds **0 projects** — the two projects and the one waitlist entry still live in `saaswaitlist-7280f`. `scripts/migrate-to-company-24267.mjs` moves them (dry run by default, `--apply` to write) and needs a service account for `company-24267`. Until it has run, `company-24267` reads as a genuinely empty catalogue and the local site shows the "No projects available yet." state. Migrate **before** repointing Vercel.
+- Client Firebase SDK only (`lib/firebase.ts`), even in server components. No `firebase-admin` / `FIREBASE_SERVICE_ACCOUNT`.
+- Missing `NEXT_PUBLIC_FIREBASE_*` falls back to a mock config: dev/build boot, but Firestore reads return empty. An empty site is not necessarily a code bug. The **server-side** cached reads do *not* swallow errors — see "Caching / rendering" below.
+- **An empty catalogue and a failed read are different states.** `/` and `/projects` render `<CatalogueUnavailable />` when the read fails and "No projects available yet." when the read succeeds with no projects. Neither page may show a bare heading over an empty grid.
+- Public pages are RSC: `app/page.tsx` and `app/projects/page.tsx` are static with `revalidate = 60`, `app/projects/[slug]/page.tsx` is ISR (see Caching below). All `app/admin/*` pages are client components reading Firestore after auth resolves.
+- `getProjectsResult()` fetches every `projects` doc and filters in memory — no composite indexes (`firestore.indexes.json` is intentionally empty). `waitlistCount` is read from each project doc, never the `waitlist` collection. `getProjectBySlugResult()` has **no status filter**, so `coming_soon` detail pages work by direct URL; the directory card renders a disabled "Coming Soon" button instead of linking to them.
+- Every read path normalises through `normalizeProject()` in `lib/db-service.ts`, so `waitlistCount` is always a number. `getProjectsResult()` / `getProjectByIdResult()` / `getProjectBySlugResult()` return `{ error }` alongside the data — use them when you need to tell "empty" from "failed". **There is no error-swallowing variant** any more: `getProjects()` / `getProjectById()` / `getProjectBySlug()` were removed so the "empty vs failed" distinction cannot be bypassed by accident.
+- Admin allowlist check in `app/admin/layout.tsx` is client-side only; **Firestore rules are the real security boundary**. `firestore.rules` is shared with nexusprods on project `company-24267` (`.firebaserc`) — keep the rules for `products`, `content`, `settings`, `contacts`, `orders`, `licenses` intact; SaaSWaitlist owns only `projects`, `waitlist`, `taxonomy` and `requests`. Writes require `isAdmin()` (allowlisted + `email_verified`). Public `projects` reads are allowed; `waitlist` reads are denied, clients may only create `waitlist/<projectId>_<normalizedEmail>` and bump `projects.waitlistCount` by exactly 1.
+- **The hardened rules are deployed.** The current `firestore.rules` adds a shared `isValidEmail()` helper (lowercase, no whitespace, no `/`, ≤ 320 chars), `keys().hasAll(...)` on both public-create collections, a `createdAt is timestamp` check, a `projectId` no-slash check, and an integer check on the waitlist counter. The owner released them to `company-24267` with `firebase deploy --only firestore:rules --project company-24267` (2026-11-23) — "rules file compiled successfully", "released rules". Re-deploy after every edit to the file.
+- **Verify rules locally before deploying** — they are shared with a live app:
+  `cd /tmp/opencode && firebase emulators:exec --only firestore --project demo-saaswaitlist --config /home/athena/Development/SaaSWaitlist/firebase.emulator.json "node /home/athena/Development/SaaSWaitlist/scripts/verify-firestore-rules.cjs"`
+  (the emulator prints "evaluation error" instead of `false` for a denied doc carrying a pending `serverTimestamp()` — diagnostic artifact, not a rules bug). The verifier currently runs **33 checks, all passing**.
+- `taxonomy/<categories|tags|techStack|features>` holds one admin-managed option list per doc (`{ values: string[], updatedAt }`). Public read, admin write. `requests/<id>` is public-**create**-only and admin-read-only (it holds emails); the create rule forces `status == "new"` and requires `projectId` to be **present but may be `""`** — never omit it, the rule interpolates it into a document path.
+- The Firebase CLI account in this environment (`coderaman07@gmail.com`) has **no access** to `company-24267` — the owner deployed the rules with an account that does. Anything else that needs write access to that project (the catalogue migration) needs the owner's service account.
 
-- The live path is the unsigned **client-side** upload in `components/ui/image-upload.tsx` (used by `components/project-form.tsx`), requiring `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` and `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`.
+## Caching / rendering
 
-## Public API
+- `app/projects/[slug]/page.tsx` exports `generateStaticParams()` returning `[]` — that is what opts the route into ISR (rendered on first visit, cached 60 s). **Removing it makes the route fully dynamic** and every request hits Firestore twice.
+- `lib/db-service.server.ts` wraps the reads in `unstable_cache`. It is **server-only** (`next/cache` does not run in the browser) — client components must keep using `lib/db-service.ts`.
+- **A failed read must never be cached as an empty catalogue.** `unstable_cache` only writes an entry when the callback *resolves*, so the internal `fetchProjects()` / `fetchProjectBySlug()` helpers **throw** on a Firestore error. `getProjectsForPage()` and `getProjectForPage()` catch it and return `{ projects | project, error }` so callers can tell "empty" from "broken".
+  - `app/page.tsx` and `app/projects/page.tsx` render `<CatalogueUnavailable />` when `error` is set — they must not throw, or the build fails.
+  - `app/projects/[slug]/page.tsx` **throws** on a read error (a failed read is not a 404) so the error boundary offers a retry.
+  - A *stale* cache entry that cannot be revalidated keeps being served — `unstable_cache` swallows the revalidation error. Only a cold cache plus a failed read surfaces an error.
+- **Filters are applied outside the cache.** `getProjectsForPage(filters)` calls `filterProjects()` (exported from `lib/db-service.ts`) in memory. Caching the filtered list would create one cache entry per distinct `?search=` value — an unbounded key space a visitor could fill with junk.
+- `getProjectForPage()` wraps the slug read in React `cache()` so `generateMetadata` and the page component share one read per request.
+- `app/sitemap.ts` behaves differently at build time and at runtime: during `phase-production-build` a failed read yields the static entries only (a build must not fail), at runtime the error is re-thrown so a stale sitemap is kept rather than a project-less one.
+- `/api/projects` is dynamic by design (it reads `request.url` for the filters). CDN caching comes from its `Cache-Control` header, not from a `revalidate` export — route handlers are not cached by the Next.js data cache.
 
-- **`GET /api/projects`** (`app/api/projects/route.ts`) — returns all projects (active + coming_soon) as JSON: `{ projects: Project[], count: number }`.
-- Supports query params forwarded to `getProjects()`: `?search=`, `?category=`, `?tag=`.
-- Sets CORS headers (`Access-Control-Allow-Origin: *`) for cross-origin use from other websites.
-- `export const revalidate = 60` (1-minute stale-while-revalidate, matching public pages).
-- Public reads on `projects` are allowed by `firestore.rules`, so no auth is required.
+## Public API / uploads
 
-## Waitlist Registration + Nexus Link
+- `GET /api/projects` (`app/api/projects/route.ts`) returns `{ projects, count }`; `?search=`, `?category=`, `?tag=` are forwarded to the cached project read. CORS `*`, `OPTIONS` preflight, `Cache-Control: public, s-maxage=60, stale-while-revalidate=300`. No auth needed, and `robots.txt` does not block it.
+- A failed read returns **503** with `Cache-Control: no-store` and `Retry-After: 60` — never a `200` with an empty list, which would be indistinguishable from "there are no projects" and would be cached by the CDN.
+- Cloudinary uploads are unsigned and client-side (`components/ui/image-upload.tsx`, used by `components/project-form.tsx`); only `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` and `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET` are used. No server-side Cloudinary secrets.
 
-- Waitlist signup (`components/waitlist-form.tsx`) saves the email to `localStorage` under key `saaswaitlist_waitlist_<projectId>` on successful signup.
-- Project detail page (`app/projects/[slug]/page.tsx`) uses `WaitlistStatus` (`components/waitlist-status.tsx`) which checks localStorage:
-  - Not registered → **redirects to Nexus website** (http://localhost:3001 dev / https://nexusprods.vercel.app prod)
-  - Already registered → shows "You&apos;re already on the waitlist!" + `NexusLink` button
-- **`NexusLink`** (`components/nexus-link.tsx`) — button linking to the Nexus company website:
-  - Dev: `http://localhost:3001` (from `NEXT_PUBLIC_NEXUS_URL` or fallback)
-  - Production: `https://nexusprods.vercel.app`
-  - Shows "5% off subscription" badge
-- Add `NEXT_PUBLIC_NEXUS_URL` to `.env.local` to override the Nexus URL.
+## Waitlist + Nexus link
+
+- `components/waitlist-form.tsx` runs a Firestore transaction: create `waitlist/<projectId>_<normalizedEmail>` and increment `projects.waitlistCount` atomically. Rules deny `update`, so a repeat signup fails with `permission-denied`; the form treats that as already registered.
+- The form validates the email against the same rules (regex, 320-char limit, **no `/`** — a Firestore document id cannot contain a slash) so `permission-denied` can only mean "already registered". A denied write is still ambiguous: the project could have been deleted meanwhile, so the form re-reads the project before deciding which message to show.
+- Success saves `localStorage` key `saaswaitlist_waitlist_<projectId>` and dispatches `saaswaitlist:waitlist-updated` (`lib/waitlist.ts`). **`localStorage` can throw `SecurityError`** when cookies are blocked — `lib/waitlist.ts` catches it, logs a warning and carries on. The flag is a convenience; the Firestore rules are what actually prevent a duplicate signup.
+- **The counter is re-derived, not backfilled.** `reconcileWaitlistCounts()` (in `lib/db-service.ts`) re-counts the `waitlist` collection for every project and rewrites the counter when it drifts. It runs from `components/nexus-reconciliation-provider.tsx` on **every** reconciliation cycle — and it runs **before** the Nexus availability check, so a paused or failing Nexus sync never stops the counter from being repaired. The rules cannot couple an increment to its waitlist entry (the entry id contains the address, which must stay private), so the count of entries is the truth. It needs admin read access to `waitlist`. A failed repair is **visible**: the provider keeps it in its own `waitlistError` slot (a successful Nexus cycle must not clear it) and `components/nexus-pending-deletions.tsx` renders it as an alert.
+- `WaitlistStatus` renders `WaitlistForm` when not registered, otherwise "You're already on the waitlist!" + `NexusLink`. `NexusLink` is a plain `<a>` to `getNexusSiteUrl()` with a 5%-off badge; no redirect off-site for new visitors.
+
+## Public submission path
+
+- **`/request` is the single public submission channel.** The "Submit Project" CTAs in the header, the hero and the FAQ all point to `/request` — never to `/admin/new`, which is admin-only and would bounce a visitor to the sign-in page.
+- `app/request/page.tsx` resolves a `?project=<slug|id>` query parameter against the catalogue and preselects it in the form's project dropdown. **Coming-soon projects count**: the dropdown lists the live projects plus the selected project, otherwise the `<select>` would hold a value with no matching option and the browser would silently reset it.
+- The request lands in the `requests` collection with `status: "new"`. The admin workflow lives on `/admin/requests`.
+- **The public forms use `noValidate`.** `components/request-form.tsx` and `components/waitlist-form.tsx` keep `required` / `type="email"` / `maxLength` on the inputs (they drive autofill and the mobile keyboard) but the `<form>` carries `noValidate`, so the browser's native bubbles do not block the submit. Without it the custom validation never runs and the inline `role="alert"` message wired up with `aria-invalid` + `aria-describedby` is unreachable. A toast alone is not enough for these forms — the message has to stay on screen.
+
+## Admin form
+
+- `components/project-form.tsx` is a real `<form>` — submit with `type="submit"`. The slug is auto-generated from the title and permanently disabled, so it only changes when the title does; `onSubmit` rejects a slug already used by another project.
+- `pricing` is numeric (e.g. `29`) for new writes. `parsePrice()` in `lib/price.ts` is the only parser; legacy free-text values (`Free`, `Freemium`) are preserved and render without a `$` prefix. The input is **`type="text"` with `inputMode="decimal"`, not `type="number"`** — a number input reports a legacy value as empty, which makes React log *"The specified value … cannot be parsed"* and would delete the stored price on save. `buildFormSchema(legacyPricing)` accepts the project's own legacy value verbatim; any other value has to be numeric.
+- `parsePrice()` matches a **plain decimal** (`/^\d+(\.\d+)?$/`), not `Number()`. `Number("0x10")` is 16 and `Number("1e3")` is 1000, so those strings would otherwise pass a numeric check and then be stored as a completely different price. The Zod refinement uses `isNumericPrice()`, so the form and the parser accept exactly the same forms. The Nexus reconciliation uses the same parser (`asPrice()` in `lib/nexus.ts` for the Nexus side, `parsePrice()` for the local side) — a malformed or legacy free-text local price is left alone instead of being rewritten from a different number.
+- Empty optional fields are **omitted on create** and **deleted with `deleteField()` on update** — `updateDoc` merges, so omitting a field would leave the old value in place and clearing it in the UI would silently do nothing.
+- `category`, `tags` and `techStack` use `components/ui/combobox.tsx` (hand-rolled on Radix Popover — **no cmdk dependency**). Options come from the `taxonomy` collection, but the values already on the project are always merged in so nothing is lost. `tags`/`techStack` are `string[]` in the Zod schema; typing a new option persists it to `taxonomy` on the spot.
+- **The combobox trigger is a `div role="combobox"`, not a `<button>`** — the multi-select chips contain their own remove buttons and a button inside a button is invalid HTML. A `div` cannot be labelled with `htmlFor`, so the label is wired up with the `labelledBy` prop (`aria-labelledby`); the `Label` uses `id="<field>-label"`, not `htmlFor`.
+- **Taxonomy writes are transactional read-modify-write against the *stored* list** (`mergeTaxonomyOptions` / `removeTaxonomyOption` / `renameTaxonomyOption` in `lib/admin-service.ts`). Never write back the array you read earlier — two admins editing different lists at the same time would lose one of the changes. There is no "save the whole list" helper any more.
+- A taxonomy rename identifies the option by its **value**, not by its index in the list — every write sorts the list, so an index would point at a different option as soon as anything else changed the list. The transaction also **verifies that the source option still exists** and reports a conflict (`TaxonomyConflictError`) instead of silently succeeding when another admin renamed or removed it in the meantime.
+- The submit handler is wrapped in a **state-based lock** (`handleFormSubmit`) so a double click cannot create two projects. A `useRef` lock is rejected by the `react-hooks/refs` lint rule.
+- Validation errors are wired up with `aria-invalid` + `aria-describedby` pointing at a `role="alert"` paragraph, so a screen reader announces them.
+
+## Admin dashboard
+
+- Routes: `/admin` (overview), `/admin/projects`, `/admin/signups`, `/admin/requests`, `/admin/taxonomy`. The nav lives in `app/admin/layout.tsx` (`ADMIN_NAV`) — add a section there, not in each page. `/admin` is the overview, **not** the project table.
+- Data hooks live in `components/admin/use-admin-data.ts` (`useAdminProjects`, `useAdminWaitlist`, `useAdminRequests`, `useAdminTaxonomy`); they re-read on the `saaswaitlist:projects-updated` event and use a request guard so a slow response cannot overwrite a newer one.
+- **Every hook error must reach the admin.** `/admin/signups` and `/admin/taxonomy` both depend on the project catalogue; if that read fails they show an alert and **disable** the actions that would be silently incomplete (the CSV export, the "Import from projects" button) instead of writing "Unknown project" rows or an empty usage count.
+- `useAdminTaxonomy` keeps **two separate error slots**: `error` is the *read* error ("could not load the lists") and `mutationError` is the *write* error ("the change was not saved"). Mixing them tells the admin their lists are missing when the real problem is one rejected edit.
+- `lib/demand.ts` is pure: `buildDemandRanking(projects, entries, requests, { useCounterFallback })` (signups + requests per tool, split into listed vs requested-but-unlisted) and `buildSignupTimeline(entries, days, now)` (local calendar days — **not** UTC, or signups shift a day). The reference `now` is passed in because reading the clock inside the function would make it impure and the React purity lint forbids it during a render.
+- The ranking counts **waitlist entries**, not the stored `waitlistCount`. The counter is only used as a stand-in when the waitlist collection could not be read at all (`useCounterFallback: Boolean(waitlistError)`).
+- Charts are hand-rolled in `components/admin/charts.tsx` (`StatCard`, `BarChart`, `HorizontalBars`) — do not add a charting library. `Sparkline` was removed as dead code; don't bring it back.
+- `useNow()` exists because React's purity lint forbids `Date.now()` during render; relative-date filters read the clock after mount.
+- `app/request/page.tsx` is the public request form. `searchParams` is a **Promise** in Next 16 — await it in the server component instead of using `useSearchParams` (which would force a Suspense boundary).
+
+### Destructive actions
+
+- **Never use `window.confirm()`.** A suppressed or dismissed native dialog fails silently and the button looks broken. Deleting a request or a project is a two-step inline confirmation instead (`confirmingId` / `isDeleteArmed`): the first click arms it, the second one deletes, and there is always a "No"/"Cancel" next to it.
+- A delete removes the row **optimistically** and restores it if the write fails. The failure is rendered **inline on the card** with the raw Firebase message *and* the error code (`permission-denied`, `unavailable`, …) — `MutationResult` in `lib/admin-service.ts` carries `code` for exactly this. A toast alone is not enough: it disappears, and it does not say which row failed.
+- The same rule applies to the status dropdown on `/admin/requests` and to option deletion in `/admin/taxonomy`.
+- The request status dropdown applies the new status **optimistically** (`statusOverrides` keyed by request id) and rolls back on failure — a controlled `<select>` otherwise snaps back to the stored value before the write finishes. The filter badges count the optimistic statuses so they stay in step with the cards.
+
+## Local Firebase emulator
+
+- `NEXT_PUBLIC_FIREBASE_EMULATOR=true` points the client SDK at the local Auth + Firestore emulators (`lib/firebase.ts`). It is off unless the variable is set, so production is unaffected. **The variable is inlined at build time** — start the dev server with it set, do not set it afterwards. `lib/firebase-target.ts` exposes `FIREBASE_TARGET` / `IS_EMULATOR` without pulling the Firebase SDK into a bundle.
+- `firebase.emulator.json` at the repo root runs Firestore on `8099` and Auth on `9099`.
+- **Run the emulator from outside the project directory** (`cd /tmp/opencode && firebase emulators:start --config /home/…/SaaSWaitlist/firebase.emulator.json …`). The emulator writes `firebase-debug.log` / `firestore-debug.log` into its working directory; when that is the repo root, Turbopack sees the file change and rebuilds in a loop, which reloads the browser every few hundred milliseconds and makes the admin UI look broken. The log names are in `.gitignore` as a second line of defence.
+- `scripts/setup-emulator-admin.mjs` creates `developerlife69@gmail.com` in the Auth emulator, marks it **verified** (the rules require `email_verified == true`) and seeds request documents. `scripts/list-emulator-requests.mjs` lists the request documents that exist.
+- Useful for exercising the admin flows end to end without touching production. The Auth emulator issues real JWTs that the Firestore emulator accepts, so the app's own sign-in form works against it.
+- Do **not** open many tabs of an admin route at once in dev — repeated hydration of the same client layout can crash React's event system ("Should not already be working"), which makes every button look dead.
+- `scripts/audit-routes.mjs` loads routes in a headless Chrome and reports every console error, warning, exception, HTTP error ≥ 400 and failed request. Use it after changes: `node scripts/audit-routes.mjs http://localhost:3000 "/,/projects,/admin" --login email:password` (signs in through the app's own form) or `--token-file <file>` (restores a session into IndexedDB — the record must match `UserImpl.toJSON()`, in particular `stsTokenManager.expirationTime` is a **number**, not an ISO string).
 
 
-## Nexus Project Sync
+## Nexus sync
 
-- `lib/nexus.ts` — `syncProjectToNexus(project, idToken)` mirrors a project to nexusprods via `POST /api/products` with `Authorization: Bearer <firebase-id-token>`. Requires the signed-in admin's email to be verified and in `NEXT_PUBLIC_ADMIN_EMAILS`.
-- **Nexus URL (dev vs prod):** In development (`NODE_ENV === "development"`), defaults to `http://localhost:3001/api/products` for the API and `http://localhost:3001` for product page links. In production, defaults to `https://nexusprods.vercel.app/api/products` and `https://nexusprods.vercel.app`. Override with `NEXT_PUBLIC_NEXUS_API_URL` and `NEXT_PUBLIC_NEXUS_URL` in `.env.local`.
-- **Transactional:** nexus is created FIRST, then local Firestore write. If nexus fails, the local project is NOT written (no orphaned records). Configured in `components/project-form.tsx` `onSubmit`.
-- Sync triggers on: new project create, or edit flipping `coming_soon → active`. Edits of already-active projects do NOT re-sync (nexus has no update endpoint).
-- Field mapping: `name`←`title`, `price`←`pricing` (string→number, defaults to 0), `category`←`category` (defaults to "General"), `status`←`active`→`live` / `coming_soon`→`upcoming`, `description`/`longDescription`←`description`, `imageUrl`←`imageUrl`, `demoUrl`←`websiteUrl`, `features`←`tags`.
-- `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
-- Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
+- `lib/nexus.ts` is client-side so Firestore writes use the signed-in admin's context. All calls send `Authorization: Bearer <firebase-id-token>` and abort after 15s. URLs come from `lib/nexus-url.ts`: the live deployment `https://nexusprods.vercel.app` is the default in **every** environment, overridable with `NEXT_PUBLIC_NEXUS_URL` / `NEXT_PUBLIC_NEXUS_API_URL`.
+- **The browser never calls Nexus directly.** `getNexusApiUrl()` returns the same-origin path `/api/nexus/products`; `app/api/nexus/[...path]/route.ts` forwards the request server-side to `getNexusUpstreamApiUrl()` and returns its status and body unchanged. Nexus only returns `Access-Control-Allow-Origin` for a fixed list of origins, and a browser on any other origin sees an opaque *"blocked by CORS policy"* error instead of the real status — the deployed SaaSWaitlist origin was missing from that list, which broke every Nexus call from the admin dashboard. Keep the proxy; do not point `getNexusApiUrl()` back at nexusprods. The proxy only forwards `products` and `products/<id>`, and only ever to the configured Nexus base URL — Nexus stays the authority on who may write.
+- **Nexus is unreachable from an emulator build.** The Auth emulator issues unsigned (`alg: none`) tokens; Nexus's edge rejects them with 403 and the browser reports the missing CORS header instead, so the real status is invisible. `NEXUS_AVAILABLE` in `lib/nexus.ts` is therefore `false` when `NEXT_PUBLIC_FIREBASE_EMULATOR=true`: the reconciliation provider skips the cycle, `components/project-form.tsx` skips the create/update/delete sync, the admin header shows "Nexus sync paused", and the proxy answers `503`. The local catalogue stays fully editable.
+- A reconciliation failure must be **visible**: the provider sets the error state (rendered by `components/nexus-pending-deletions.tsx` on `/admin`) and the admin header shows a "Nexus sync failed" badge linking there. Do not swallow it into a `console.error` — the admin has to know the catalogue may have drifted.
+- Create: Nexus first, then the local Firestore write; if the local write fails the new Nexus product is deleted, and if Nexus fails the local project is not written. Every edit calls **PATCH** (404 → recreate); delete calls DELETE (404 → success). **Nexus has no `PUT` endpoint** — `src/app/api/products/[id]/route.ts` in the Nexus repo exposes `GET`/`PATCH`/`DELETE` only. A failed local delete re-creates the Nexus product, and a failed local update rolls back to the **live** pre-edit document (read via `getProjectByIdResult`, not the stale form snapshot). The delete path aborts when the live read fails — deleting from a stale snapshot could remove the wrong Nexus product. Detail page shows "Open on Nexus" when `status === "active"` and `nexusProductId` exists.
+- The Nexus proxy (`app/api/nexus/[...path]/route.ts`) forwards `GET`, `PATCH` and `DELETE` only, and has a **15 s upstream timeout** (`AbortSignal.timeout`) — a hanging upstream answers `504` instead of leaving the request open. It must **not** export `PUT`.
+- **Reconciliation never deletes automatically.** `lib/nexus-reconciliation.ts` splits the work: `planNexusReconciliation()` is a dry run that returns `{ deletions, updates, errors }` and writes nothing; field drift (`updates`) is applied automatically, but projects missing from Nexus are only listed as **pending deletions**. `components/nexus-reconciliation-provider.tsx` runs the plan every 5 minutes from the admin layout and exposes them through context; `components/nexus-pending-deletions.tsx` renders the confirmation banner on `/admin`. **An admin must click through the confirmation to actually delete.** A completely empty Nexus response is treated as a broken response and skipped.
+- The pending-deletion confirmation stores a **reviewed snapshot** of the plan. A stale click can never delete the current list — the ids are compared against the snapshot that was actually shown to the admin.
+- A confirmed deletion also removes the project's **waitlist entries** (`deleteWaitlistEntriesForProject`). The waitlist collection holds personal data, and the privacy policy promises the entries go away with the project. Firestore accepts at most 500 writes per batch, so the cleanup is split into chunks — a project with more signups than that must still be cleaned up completely.
+- The automatic cycle and the manual confirmation share **one mutex** (`runningRef`). A cycle must never start while a manual deletion is in flight, and the cycle's `finally` must not clear the `running` state in the middle of a deletion — that would re-enable the destructive button.
+- Nexus has no `slug` — never send or compare it. Firestore updates must omit `undefined`.
+- Mapping (`toNexusPayload`): `title`→`name`, `pricing`→`price` (numeric; `parsePrice()` in `lib/price.ts`, defaults to 0), `shortDescription || description`→`description`, `description`→`longDescription`, `imageUrl`/`images`, `websiteUrl`→`demoUrl`, `tags`→`features`, `active`→`live` / `coming_soon`→`upcoming`. Reverse treats `live`→`active` and `upcoming`/`draft`/`archived`→`coming_soon`.
 
-## Nexus Sync (Bidirectional — Create, Update, Delete)
+## Auth / environment
 
-- **Local → Nexus (Create):** New projects → `POST http://localhost:3001/api/products` (dev) or `POST https://nexusprods.vercel.app/api/products` (prod) with `Authorization: Bearer <firebase-id-token>`. Transactional: nexus created FIRST, then local Firestore write. If nexus fails, local project is NOT written.
-- **Local → Nexus (Update):** Editing any project → `PUT http://localhost:3001/api/products/<nexusProductId>` (dev) or `PUT https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod). Syncs on every edit (title, description, status, category, pricing, imageUrl, websiteUrl, tags).
-- **Local → Nexus (Delete):** Deleting a project → `DELETE http://localhost:3001/api/products/<nexusProductId>` (dev) or `DELETE https://nexusprods.vercel.app/api/products/<nexusProductId>` (prod). If nexus delete fails (404 = already gone), treated as success. Local delete aborted if nexus delete fails.
-- **Nexus → Local (periodic, every 5 min):** `app/admin/layout.tsx` runs `syncDeletionsFromNexus()` when admin is signed in with verified email. Fetches `GET /api/products` from nexusprods:
-  - Local projects whose `nexusProductId` no longer exists on nexus → deleted locally
-  - Local projects whose fields differ from nexus → updated locally (title, description, status, category, pricing, imageUrl, websiteUrl, tags)
-- `lib/nexus.ts` exports: `syncProjectToNexus()`, `updateProjectToNexus()`, `deleteProductFromNexus()`, `getAllNexusProducts()`, `syncDeletionsFromNexus()`. Runs on the client (no `"use server"`) so Firestore writes use the authenticated user's context.
-- **Field mapping (local → nexus):** `name`←`title`, `price`←`pricing` (string→number, default 0), `category`←`category` (default "General"), `status`←`active`→`live` / `coming_soon`→`upcoming`, `description`/`longDescription`←`description`, `imageUrl`←`imageUrl`, `demoUrl`←`websiteUrl`, `features`←`tags`.
-- **Field mapping (nexus → local):** reverse of above; `live`→`active`, `upcoming`→`coming_soon`, `draft`→`coming_soon`, `archived`→`coming_soon`.
-- `Project` type has `nexusProductId?: string` to store the mirrored product's ID on nexus.
-- Detail page (`app/projects/[slug]/page.tsx`) shows an "Open on Nexus" button linking to the nexus product page (localhost:3001 in dev, nexusprods.vercel.app in prod) when `status === "active"` and `nexusProductId` exists, alongside the existing "Visit Application" button.
+- `app/error.tsx` calls **`retry()`**, not `reset()` — `reset()` re-renders the tree but does not re-run the failed server render, so the error would come straight back. `retry()` re-fetches the RSC payload.
+- Admin sign-in is email/password or Google popup (`components/admin-login.tsx`); Google must be enabled in Firebase Console. Unverified emails get a "Verify your email" banner with a Resend button instead of the dashboard, and CRUD is blocked (nexusprods requires `emailVerified`).
+- A broken auth listener is **not** the same as "not signed in": both `app/admin/layout.tsx` and `components/admin-login.tsx` render the listener error instead of showing the ordinary sign-in card, so a blocked network or a bad Firebase config is visible.
+- The admin sign-in form prints the Firebase project id and target (`production` / `local emulator`) — the same email can exist in several projects, and `auth/invalid-credential` means the password is wrong for *that* project. `describeAuthError()` maps the Firebase codes to actionable text; expected credential failures are logged with `console.warn`, not `console.error`, so the Next.js dev overlay does not flag a wrong password as a broken app.
+- Google sign-in tries `signInWithPopup` and **falls back to `signInWithRedirect` when the popup is blocked** (`auth/popup-blocked`) — a popup the user closed is left alone. `auth/popup-closed-by-user` is reported as a cancellation, not retried.
+- The admin allowlist must match the hardcoded list in `firestore.rules` (`isAdmin()`), and the signed-in account must be `email_verified`. A Google sign-in with a different account lands on the "Access denied" card instead of the dashboard.
+- Node 20+. `cp .env.example .env.local` (committed template; `.env*` otherwise ignored). `NEXT_PUBLIC_ADMIN_EMAILS` must match the hardcoded allowlist in `firestore.rules`. `NEXT_PUBLIC_SITE_URL` drives sitemap/robots/metadata. Don't hardcode localhost Nexus URLs in `.env.local` if you also run production builds locally.
 
-## Email Verification (Admin Access)
+## Deployment checklist
 
-- `app/admin/layout.tsx` — after sign-in, if `user.emailVerified === false`, shows a "Verify your email" banner with a **Resend Verification Link** button instead of the admin dashboard.
-- `sendEmailVerification(user)` from `firebase/auth` is called when the button is clicked. Firebase sends a verification email to the user's address.
-- Admin features (project create/edit/delete) are **blocked** until email is verified — required because nexusprods' `POST /api/products` checks `emailVerified === true`.
-- Once verified, the user is redirected to the normal admin dashboard on next load.
+The Firestore rules are **done** — released to `company-24267` on 2026-11-23. Three things are still pending:
 
-## Google Sign-In (Admin Access)
+1. **Migrate the catalogue.** `company-24267` has no projects yet. Run `scripts/migrate-to-company-24267.mjs --apply` with a service account for `company-24267` (`FIREBASE_SERVICE_ACCOUNT` or `--service-account-file`). It moves 2 projects and 1 waitlist entry, re-keys the waitlist entry to `<projectId>_<email>` as the deployed rules require, and recalculates `waitlistCount`. The dry run needs only `SOURCE_API_KEY`.
+2. **Redeploy Vercel against `company-24267`.** The deployed build still points at the previous project (`saaswaitlist-7280f`). Update its `NEXT_PUBLIC_FIREBASE_*` variables and redeploy — **after** the migration, or the live site shows an empty catalogue.
+3. **Deploy the Nexus CORS change** on the Nexus side — the allowlist was extended to include the SaaSWaitlist origin, but that change needs its own deploy.
 
-- `components/admin-login.tsx` — includes a "Sign in with Google" button using `signInWithPopup(auth, googleProvider)` from Firebase Auth.
-- Requires Google sign-in to be **enabled in Firebase Console** → Authentication → Sign-in method → Google → Enable.
-- The Google account used must match an email in `NEXT_PUBLIC_ADMIN_EMAILS` and be email-verified for nexusprods API access.
+`nexusprods` shares `company-24267`, so the rules deploy also touched the collections that app depends on (`products`, `content`, `settings`, `contacts`, `orders`, `licenses`). Smoke-test that app after the rules deploy.
 
-## Environment
+## Dependencies
 
-- Prerequisite: **Node 20+** (README). `npm run dev` may fail on older Node.
-- `.env*` is gitignored and there is **no `.env.example`**, despite the README telling you to `cp .env.example .env.local`. Create `.env.local` by hand.
-- `NEXT_PUBLIC_NEXUS_URL` — Nexus company website URL for waitlist discount link. Defaults to `http://localhost:3001` (dev) or `https://nexusprods.vercel.app` (prod).
-
-## Dependencies / security
-
-- `npm audit` is **clean (0 vulnerabilities)**. This depends on `overrides` in `package.json` — do not delete them without re-running `npm audit`:
-  - `@grpc/grpc-js` → `^1.14.6` (fixes the `@firebase/firestore` chain).
-  - `postcss-selector-parser` → `^7.1.6` (fixes `@tailwindcss/typography`).
-  - `@next/eslint-plugin-next.fast-glob` → aliased to `npm:tinyglobby`. This removes `braces` (and `micromatch`/`chokidar`), whose advisory has **no patched `braces` release**. Tailwind v4 also drops those, so `fast-glob`/`micromatch`/`braces` are gone from the tree.
-- `next` and `eslint-config-next` are pinned to the same version (`16.4.2`); bump them together.
-- Lint is clean (0 errors) — `npm run lint` exits 0. The 4 remaining warnings are pre-existing and non-blocking (unused `orderBy` import, `` elements, React Hook Form watch incompatibility).
-
-## Do not run
-
-- `fix-layout.py` (repo root) is a one-off throwaway script that rewrites `app/projects/[slug]/page.tsx` via blind string slicing. Running it will clobber that file.
+- `package.json` `overrides` are deliberate security pins — don't remove them without re-running `npm audit --omit=dev`. `next` and `eslint-config-next` are pinned together (16.4.6); keep ≥16.4.5. The remaining dev-only `picomatch@4` advisory has no upstream patch and is accepted; don't adopt third-party forks without owner approval.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

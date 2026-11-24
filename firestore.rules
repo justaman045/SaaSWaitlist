@@ -1,14 +1,32 @@
 rules_version = '2';
 
-// NOTE: money/fulfillment writes (orders, licenses, products.purchases) happen
-// server-side with the Admin SDK, which bypasses these rules. Keep in sync with
-// NEXT_PUBLIC_ADMIN_EMAILS (.env.example / Vercel).
+// NOTE: nexusprods shares this Firebase project. Collections such as products,
+// content, settings, contacts, orders and licenses belong to that app and are
+// kept here so deploying these rules does not break it. SaaSWaitlist owns the
+// `projects` and `waitlist` collections.
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       return request.auth != null
         && request.auth.token.email in ['developerlife69@gmail.com']
         && request.auth.token.email_verified == true;
+    }
+
+    // Shared email validation for the two public collections that hold an
+    // address. The client normalises every address before it is stored, so
+    // anything that does not match this shape is a malformed write:
+    //   - lowercase, so the same person cannot create a second entry with a
+    //     different casing,
+    //   - no whitespace, so the stored value cannot differ from the value
+    //     that is embedded in the document id,
+    //   - no slash, because Firestore document ids cannot contain one.
+    function isValidEmail(email) {
+      return email is string
+        && email.size() > 0
+        && email.size() <= 320
+        && email == email.lower()
+        && email.matches("^[^@\\s]+@[^@\\s]+[.][^@\\s]+$")
+        && !email.matches(".*/.*");
     }
 
     // Public catalog + settings (read-only for everyone)
@@ -29,13 +47,15 @@ service cloud.firestore {
     }
 
     // Contact form: authenticated users only, with field size limits to prevent abuse.
+    // `isValidEmail` mirrors the shape the waitlist / requests collections
+    // require, so a malformed address can never enter the collection through
+    // any write path.
     match /contacts/{documentId} {
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly(["name", "email", "subject", "message", "createdAt"])
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 200
-        && request.resource.data.email is string
-        && request.resource.data.email.size() <= 200
+        && isValidEmail(request.resource.data.email)
         && request.resource.data.subject is string
         && request.resource.data.subject.size() <= 200
         && request.resource.data.message is string
@@ -57,18 +77,80 @@ service cloud.firestore {
     }
 
     // SaaSWaitlist projects: public read so landing/directory pages can populate.
-    // Admin writes require verified email (isAdmin).
+    // Admin writes require a verified allowlisted email. The only non-admin
+    // write is the atomic waitlist counter bump (+1, no other fields).
     match /projects/{projectId} {
+      function isWaitlistCountIncrement() {
+        // The counter may only ever move up by exactly one and only the
+        // counter field may change. The stored value has to be an integer as
+        // well: a document whose counter was corrupted into a string could
+        // otherwise be used to smuggle an arbitrary number in.
+        //
+        // Note that a determined caller can still call this repeatedly. The
+        // rules cannot tie an increment to the waitlist entry that caused it
+        // (the entry id contains the address, which must not become
+        // publicly readable), so the count is re-derived from the waitlist
+        // collection by `reconcileWaitlistCounts()` in the admin dashboard.
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["waitlistCount"])
+          && request.resource.data.waitlistCount is int
+          && resource.data.get("waitlistCount", 0) is int
+          && request.resource.data.waitlistCount == resource.data.get("waitlistCount", 0) + 1;
+      }
+
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isWaitlistCountIncrement();
+    }
+
+    // SaaSWaitlist waitlist: contains personal data, so reads are admin-only.
+    // Anonymous visitors may create exactly one entry per (project, email):
+    // the document id is enforced to match "<projectId>_<email>".
+    match /waitlist/{waitlistId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if request.resource.data.keys().hasOnly(["projectId", "email", "createdAt"])
+        && request.resource.data.keys().hasAll(["projectId", "email", "createdAt"])
+        && request.resource.data.projectId is string
+        && request.resource.data.projectId.size() > 0
+        && request.resource.data.projectId.size() <= 128
+        && !request.resource.data.projectId.matches(".*/.*")
+        && isValidEmail(request.resource.data.email)
+        && request.resource.data.createdAt is timestamp
+        && waitlistId == request.resource.data.projectId + "_" + request.resource.data.email
+        && exists(/databases/$(database)/documents/projects/$(request.resource.data.projectId));
+    }
+
+    // SaaSWaitlist taxonomy: the admin-managed option lists behind the
+    // category / tag / tech-stack dropdowns. Each document holds one list
+    // (`taxonomy/categories`, `taxonomy/tags`, ...). Public read — the lists
+    // contain no personal data and the public site reuses the vocabulary.
+    match /taxonomy/{documentId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // SaaSWaitlist waitlist: public read so waitlistCount can be displayed.
-    // Public create (email capture), admin-only update/delete.
-    match /waitlist/{waitlistId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAdmin();
+    // SaaSWaitlist feature/tool requests submitted by the public.
+    // The collection holds email addresses, so it is admin-read-only.
+    // Visitors may create a request but must start at status "new".
+    // `projectId` is always present (empty string when the request is not
+    // tied to a project) so the rule never has to interpolate a missing
+    // field into a document path.
+    match /requests/{requestId} {
+      allow create: if request.resource.data.keys().hasOnly(["title", "description", "email", "projectId", "status", "createdAt"])
+        && request.resource.data.keys().hasAll(["title", "description", "email", "projectId", "status", "createdAt"])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 2000
+        && isValidEmail(request.resource.data.email)
+        && request.resource.data.status == "new"
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.projectId is string
+        && request.resource.data.projectId.size() <= 128
+        && !request.resource.data.projectId.matches(".*/.*")
+        && (request.resource.data.projectId == ""
+            || exists(/databases/$(database)/documents/projects/$(request.resource.data.projectId)));
+      allow read, update, delete: if isAdmin();
     }
 
     // Default: deny all other access.

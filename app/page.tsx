@@ -4,7 +4,8 @@ import { FAQSection } from "@/components/faq-section"
 import { TestimonialsSection } from "@/components/testimonials-section"
 import { CTASection } from "@/components/cta-section"
 import { ProjectCard } from "@/components/project-card"
-import { getProjects } from "@/lib/db-service"
+import { CatalogueUnavailable } from "@/components/catalogue-unavailable"
+import { getProjectsForPage } from "@/lib/db-service.server"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowRight } from "lucide-react"
@@ -12,7 +13,7 @@ import { ArrowRight } from "lucide-react"
 export const revalidate = 60; // Revalidate every minute
 
 export default async function Home() {
-  const allProjects = await getProjects()
+  const { projects: allProjects, error } = await getProjectsForPage()
   const featuredProjects = allProjects.slice(0, 6)
 
   return (
@@ -28,19 +29,30 @@ export default async function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-            {featuredProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
+          {error ? (
+            <CatalogueUnavailable detail={error} />
+          ) : featuredProjects.length === 0 ? (
+            // The catalogue is empty — not broken. Say so instead of
+            // leaving a bare heading over an empty grid. The wording
+            // matches `/projects` so the two pages agree.
+            <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 px-6 py-16 text-center text-muted-foreground">
+              No projects available yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+              {featuredProjects.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+            </div>
+          )}
 
           <div className="flex justify-center mt-10">
-            <Link href="/projects">
-              <Button variant="outline" size="lg" className="h-12 px-8 rounded-full border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all">
+            <Button asChild variant="outline" size="lg" className="h-12 px-8 rounded-full border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all">
+              <Link href="/projects">
                 View All Projects
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </div>
       </section>

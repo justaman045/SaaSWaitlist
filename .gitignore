@@ -30,8 +30,19 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Firebase emulator logs. The emulator writes these into the project root,
+# and Next's dev server watches the tree — an appending log file makes
+# Turbopack rebuild (and the browser reload) in a loop.
+firebase-debug.log
+firestore-debug.log
+database-debug.log
+pubsub-debug.log
+ui-debug.log
+*-debug.log
+
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel

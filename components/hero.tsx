@@ -14,7 +14,7 @@ export function Hero() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
                 >
-                    <div className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-sm font-medium text-primary backdrop-blur-xl mb-8 hover:bg-primary/20 transition-colors cursor-pointer">
+                    <div className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-sm font-medium text-primary backdrop-blur-xl mb-8 hover:bg-primary/20 transition-colors">
                         <span className="flex h-2 w-2 rounded-full bg-primary mr-2 animate-pulse"></span>
                         New Projects Added Weekly
                         <ChevronRight className="ml-1 h-3 w-3" />
@@ -46,18 +46,18 @@ export function Hero() {
                     transition={{ duration: 0.5, delay: 0.3 }}
                     className="flex flex-wrap items-center justify-center gap-4"
                 >
-                    <Link href="/projects">
-                        <Button size="lg" className="h-12 px-8 rounded-full text-base font-semibold shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_rgba(255,255,255,0.4)] transition-all">
+                    <Button asChild size="lg" className="h-12 px-8 rounded-full text-base font-semibold shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_rgba(255,255,255,0.4)] transition-all">
+                        <Link href="/projects">
                             Explore Projects
                             <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-                    </Link>
-                    <Link href="/admin/new">
-                        <Button variant="outline" size="lg" className="h-12 px-8 rounded-full text-base border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 backdrop-blur-sm transition-all">
+                        </Link>
+                    </Button>
+                    <Button asChild variant="outline" size="lg" className="h-12 px-8 rounded-full text-base border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 backdrop-blur-sm transition-all">
+                        <Link href="/request">
                             <Sparkles className="mr-2 h-4 w-4" />
                             Submit Project
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </motion.div>
             </div>
         </section>

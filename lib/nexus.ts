@@ -1,72 +1,147 @@
 import { Project } from "@/types"
-import { deleteProject } from "@/lib/db-service"
-import { db } from "@/lib/firebase"
-import { doc, updateDoc } from "firebase/firestore"
+import { getNexusApiUrl } from "@/lib/nexus-url"
+import { parsePrice } from "@/lib/price"
+import { IS_EMULATOR } from "@/lib/firebase-target"
 
-const NEXUS_API_URL =
-    process.env.NEXT_PUBLIC_NEXUS_API_URL ||
-    (process.env.NODE_ENV === "development"
-        ? "http://localhost:3001/api/products"
-        : "https://nexusprods.vercel.app/api/products")
+const REQUEST_TIMEOUT_MS = 15_000
 
-const NEXUS_SITE_URL =
-    process.env.NEXT_PUBLIC_NEXUS_URL ||
-    (process.env.NODE_ENV === "development" ? "http://localhost:3001" : "https://nexusprods.vercel.app")
+/**
+ * Whether the Nexus integration can work at all in this build.
+ *
+ * Nexus is a production service that validates the caller against the
+ * production Firebase project. The local emulator issues unsigned
+ * (`alg: none`) tokens, which Nexus's edge rejects with 403 — so syncing
+ * while the emulator is running can never succeed and would only produce
+ * misleading errors. Callers skip the sync instead.
+ */
+export const NEXUS_AVAILABLE = !IS_EMULATOR
+
+/** Shown wherever the admin needs to know why the sync is not running. */
+export const NEXUS_UNAVAILABLE_REASON = IS_EMULATOR
+    ? "Nexus sync is paused because this build runs against the local Firebase emulator."
+    : ""
 
 export interface NexusSyncResult {
     ok: boolean
     nexusId?: string
     error?: string
     status?: number
-    productPageUrl?: string
 }
 
 export interface NexusProduct {
     id: string
-    name: string
-    description?: string
-    status?: string
     [key: string]: unknown
 }
 
+export function asString(value: unknown): string | undefined {
+    return typeof value === "string" ? value : undefined
+}
+
+export function asFiniteNumber(value: unknown): number | undefined {
+    const parsed = typeof value === "number" ? value : Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
 /**
- * Maps a local Project to the nexus product payload and creates it on nexusprods.
+ * Parses a price that comes from Nexus.
+ *
+ * `Number()` would accept "0x10" (16) and "1e3" (1000), which are not
+ * prices. A malformed value is ignored instead of silently becoming a
+ * different amount and overwriting the local price.
+ */
+export function asPrice(value: unknown): number | undefined {
+    if (typeof value === "number") {
+        return Number.isFinite(value) && value >= 0 ? value : undefined
+    }
+    if (typeof value !== "string") return undefined
+    return parsePrice(value) ?? undefined
+}
+
+function debugLog(...args: unknown[]) {
+    if (process.env.NODE_ENV === "development") {
+        console.log(...args)
+    }
+}
+
+/**
+ * Wraps fetch with an abort timeout so a slow/unreachable nexusprods instance
+ * can never leave the admin UI stuck in a loading state.
+ *
+ * The request goes to this app's own `/api/nexus/...` route, which proxies
+ * it to Nexus server-side — so there is no CORS involved and the browser
+ * always sees the real HTTP status.
+ */
+async function nexusFetch(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+    try {
+        return await fetch(url, { ...init, signal: controller.signal })
+    } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+            throw new Error("Nexus request timed out — is nexusprods reachable?")
+        }
+        throw error
+    } finally {
+        clearTimeout(timeoutId)
+    }
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+    let errorMsg = fallback
+    try {
+        const errorBody = await response.json()
+        errorMsg = errorBody?.error || errorBody?.message || errorMsg
+        if (process.env.NODE_ENV === "development" && errorBody?.details) {
+            errorMsg += ` — ${errorBody.details}`
+        }
+    } catch {
+        // ignore parse errors, use status-based message
+    }
+    return errorMsg
+}
+
+/**
+ * Maps a local Project to the nexus product payload.
+ * Kept in one place so create and update can never drift apart.
+ */
+function toNexusPayload(project: Project) {
+    const images = Array.isArray(project.images) ? project.images : []
+
+    return {
+        name: project.title,
+        price: parsePrice(project.pricing) ?? 0,
+        category: project.category?.trim() || "General",
+        status: project.status === "active" ? "live" : "upcoming",
+        description: project.shortDescription?.trim() || project.description,
+        longDescription: project.description,
+        descriptionType: "plain" as const,
+        imageUrl: project.imageUrl?.trim() || images[0] || "",
+        images,
+        // Always send the field — even when empty. Nexus only overwrites a
+        // field it receives, so sending `undefined` would leave a stale
+        // `demoUrl` on the mirrored product after the website URL is
+        // cleared locally.
+        demoUrl: project.websiteUrl || "",
+        features: project.tags ?? [],
+    }
+}
+
+/**
+ * Creates the mirrored product on nexusprods.
  * Requires a Firebase ID token (Bearer) for admin authorization.
  */
 export async function syncProjectToNexus(
     project: Project,
     idToken: string
 ): Promise<NexusSyncResult> {
-    // Map local status to nexus status
-    const statusMap: Record<string, string> = {
-        active: "live",
-        coming_soon: "upcoming",
-    }
-
-    // price is required (number >= 0) on nexus; local pricing is a string like "Freemium"
-    const price = Number(project.pricing)
-    const numericPrice = Number.isFinite(price) ? price : 0
-
-    // category is required on nexus; optional locally
-    const category = project.category || "General"
-
-    const body = {
-        name: project.title,
-        price: numericPrice,
-        category,
-        status: statusMap[project.status] || "upcoming",
-        description: project.shortDescription || project.description,
-        longDescription: project.description,
-        descriptionType: "plain",
-        imageUrl: project.imageUrl || project.images?.[0] || "",
-        demoUrl: project.websiteUrl,
-        features: project.tags || [],
-    }
+    const url = getNexusApiUrl()
+    const body = toNexusPayload(project)
 
     try {
-        console.log(`[Nexus Sync] POST ${NEXUS_API_URL}`, { body, hasAuth: !!idToken })
+        debugLog(`[Nexus Sync] POST ${url}`, { body, hasAuth: !!idToken })
 
-        const response = await fetch(NEXUS_API_URL, {
+        const response = await nexusFetch(url, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -75,32 +150,19 @@ export async function syncProjectToNexus(
             body: JSON.stringify(body),
         })
 
-        console.log(`[Nexus Sync] POST ${NEXUS_API_URL} -> ${response.status}`, response.ok ? "success" : "failed")
+        debugLog(`[Nexus Sync] POST ${url} -> ${response.status}`, response.ok ? "success" : "failed")
 
         if (!response.ok) {
-            let errorMsg = `Nexus create failed (HTTP ${response.status})`
-            try {
-                const errorBody = await response.json()
-                errorMsg = errorBody?.error || errorBody?.message || errorMsg
-                // Include details in development for debugging (e.g. FIREBASE_SERVICE_ACCOUNT missing)
-                if (process.env.NODE_ENV === "development" && errorBody?.details) {
-                    errorMsg += ` — ${errorBody.details}`
-                }
-            } catch {
-                // ignore parse errors, use status-based message
+            return {
+                ok: false,
+                error: await readErrorMessage(response, `Nexus create failed (HTTP ${response.status})`),
+                status: response.status,
             }
-            return { ok: false, error: errorMsg, status: response.status }
         }
 
         const data = await response.json()
-        const nexusId = data?.id
-        return {
-            ok: true,
-            nexusId,
-            productPageUrl: nexusId
-                ? `${NEXUS_SITE_URL}/products/${nexusId}`
-                : undefined,
-        }
+        const nexusId = asString(data?.id)
+        return { ok: true, nexusId }
     } catch (error) {
         return {
             ok: false,
@@ -111,23 +173,22 @@ export async function syncProjectToNexus(
 
 /**
  * Deletes a product from nexusprods by its nexus product ID.
- * Requires a Firebase ID token (Bearer) for admin authorization.
  */
 export async function deleteProductFromNexus(
     nexusProductId: string,
     idToken: string
 ): Promise<NexusSyncResult> {
-    try {
-        console.log(`[Nexus Sync] DELETE ${NEXUS_API_URL}/${nexusProductId}`, { hasAuth: !!idToken })
+    const url = `${getNexusApiUrl()}/${encodeURIComponent(nexusProductId)}`
 
-        const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
+    try {
+        debugLog(`[Nexus Sync] DELETE ${url}`, { hasAuth: !!idToken })
+
+        const response = await nexusFetch(url, {
             method: "DELETE",
-            headers: {
-                Authorization: `Bearer ${idToken}`,
-            },
+            headers: { Authorization: `Bearer ${idToken}` },
         })
 
-        console.log(`[Nexus Sync] DELETE ${NEXUS_API_URL}/${nexusProductId} -> ${response.status}`, response.ok ? "success" : "failed")
+        debugLog(`[Nexus Sync] DELETE ${url} -> ${response.status}`, response.ok ? "success" : "failed")
 
         // 404 means product already deleted on nexus — treat as success
         if (response.status === 404) {
@@ -135,64 +196,41 @@ export async function deleteProductFromNexus(
         }
 
         if (!response.ok) {
-            let errorMsg = `Nexus delete failed (HTTP ${response.status})`
-            try {
-                const errorBody = await response.json()
-                errorMsg = errorBody?.error || errorBody?.message || errorMsg
-            } catch {
-                // ignore parse errors
+            return {
+                ok: false,
+                error: await readErrorMessage(response, `Nexus delete failed (HTTP ${response.status})`),
+                status: response.status,
             }
-            return { ok: false, error: errorMsg, status: response.status }
         }
 
         return { ok: true }
     } catch (error) {
         return {
             ok: false,
-            error: error instanceof Error ? error.message : "Unknown nexus delete error",
+            error: error instanceof Error ? error.message : "Unknown nexus sync error",
         }
     }
 }
 
 /**
  * Updates a product on nexusprods by its nexus product ID.
- * Requires a Firebase ID token (Bearer) for admin authorization.
- * Uses PUT to update all fields.
  */
 export async function updateProjectToNexus(
     nexusProductId: string,
     project: Project,
     idToken: string
 ): Promise<NexusSyncResult> {
-    // Map local status to nexus status
-    const statusMap: Record<string, string> = {
-        active: "live",
-        coming_soon: "upcoming",
-    }
-
-    const price = Number(project.pricing)
-    const numericPrice = Number.isFinite(price) ? price : 0
-
-    const category = project.category || "General"
-
-    const body = {
-        name: project.title,
-        price: numericPrice,
-        category,
-        status: statusMap[project.status] || "upcoming",
-        description: project.shortDescription || project.description,
-        longDescription: project.description,
-        descriptionType: "plain",
-        imageUrl: project.imageUrl || project.images?.[0] || "",
-        demoUrl: project.websiteUrl,
-        features: project.tags || [],
-    }
+    const url = `${getNexusApiUrl()}/${encodeURIComponent(nexusProductId)}`
+    const body = toNexusPayload(project)
 
     try {
-        console.log(`[Nexus Sync] PUT ${NEXUS_API_URL}/${nexusProductId}`, { body, hasAuth: !!idToken })
+        debugLog(`[Nexus Sync] PATCH ${url}`, { body, hasAuth: !!idToken })
 
-        const response = await fetch(`${NEXUS_API_URL}/${nexusProductId}`, {
-            method: "PUT",
+        // Nexus exposes PATCH on `/api/products/[id]` — there is no PUT
+        // handler, so a PUT is answered with 405 and every mirrored edit
+        // fails. PATCH accepts the same payload shape.
+        const response = await nexusFetch(url, {
+            method: "PATCH",
             headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${idToken}`,
@@ -200,7 +238,7 @@ export async function updateProjectToNexus(
             body: JSON.stringify(body),
         })
 
-        console.log(`[Nexus Sync] PUT ${NEXUS_API_URL}/${nexusProductId} -> ${response.status}`, response.ok ? "success" : "failed")
+        debugLog(`[Nexus Sync] PATCH ${url} -> ${response.status}`, response.ok ? "success" : "failed")
 
         // 404 means product doesn't exist on nexus — caller should create it instead
         if (response.status === 404) {
@@ -208,24 +246,15 @@ export async function updateProjectToNexus(
         }
 
         if (!response.ok) {
-            let errorMsg = `Nexus update failed (HTTP ${response.status})`
-            try {
-                const errorBody = await response.json()
-                errorMsg = errorBody?.error || errorBody?.message || errorMsg
-                if (process.env.NODE_ENV === "development" && errorBody?.details) {
-                    errorMsg += ` — ${errorBody.details}`
-                }
-            } catch {
-                // ignore parse errors
+            return {
+                ok: false,
+                error: await readErrorMessage(response, `Nexus update failed (HTTP ${response.status})`),
+                status: response.status,
             }
-            return { ok: false, error: errorMsg, status: response.status }
         }
 
         const data = await response.json()
-        return {
-            ok: true,
-            nexusId: data?.id ?? nexusProductId,
-        }
+        return { ok: true, nexusId: asString(data?.id) ?? nexusProductId }
     } catch (error) {
         return {
             ok: false,
@@ -236,142 +265,40 @@ export async function updateProjectToNexus(
 
 /**
  * Fetches all products from nexusprods.
- * Requires a Firebase ID token (Bearer) for admin authorization.
+ *
+ * Throws when the response is malformed so callers never treat a broken
+ * response as "everything was deleted".
+ *
+ * The `total` is the number of products Nexus itself counts. A response
+ * whose `products` array is shorter than `total` was filtered or truncated
+ * upstream, and must not be used to decide that local projects are missing.
  */
-export async function getAllNexusProducts(idToken: string): Promise<NexusProduct[]> {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
-
-    try {
-        console.log(`[Nexus Sync] GET ${NEXUS_API_URL}`, { hasAuth: !!idToken })
-
-        const response = await fetch(NEXUS_API_URL, {
-            method: "GET",
-            headers: {
-                Authorization: `Bearer ${idToken}`,
-            },
-            signal: controller.signal,
-        })
-
-        clearTimeout(timeoutId)
-        console.log(`[Nexus Sync] GET ${NEXUS_API_URL} -> ${response.status}`, response.ok ? "success" : "failed")
-
-        if (!response.ok) {
-            throw new Error(`Nexus fetch failed (HTTP ${response.status})`)
-        }
-
-        const data = await response.json()
-        return data?.products ?? []
-    } catch (error) {
-        clearTimeout(timeoutId)
-        if (error instanceof DOMException && error.name === "AbortError") {
-            throw new Error("Nexus fetch timed out — is nexusprods running on localhost:3001?")
-        }
-        throw error instanceof Error ? error : new Error("Unknown nexus fetch error")
-    }
-}
-
-/**
- * Compares local projects against nexus products and deletes local projects
- * that no longer exist on nexus (e.g. deleted directly on nexusprods).
- * Returns the list of deleted local project IDs.
- */
-/**
- * Compares local projects against nexus products and:
- * 1. Deletes local projects that no longer exist on nexus
- * 2. Updates local projects whose fields differ from nexus
- * Returns the list of deleted/updated local project IDs.
- */
-export async function syncDeletionsFromNexus(
-    localProjects: Project[],
+export async function getAllNexusProducts(
     idToken: string
-): Promise<{ deleted: string[]; updated: string[]; errors: string[] }> {
-    const deleted: string[] = []
-    const updated: string[] = []
-    const errors: string[] = []
+): Promise<{ products: NexusProduct[]; total: number }> {
+    const url = getNexusApiUrl()
 
-    try {
-        const nexusProducts = await getAllNexusProducts(idToken)
-        const nexusMap = new Map(nexusProducts.map((p) => [p.id, p]))
+    debugLog(`[Nexus Sync] GET ${url}`, { hasAuth: !!idToken })
 
-        // Nexus status → local status mapping
-        const nexusToLocalStatus: Record<string, string> = {
-            live: "active",
-            upcoming: "coming_soon",
-            draft: "coming_soon",
-            archived: "coming_soon",
-        }
+    const response = await nexusFetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${idToken}` },
+    })
 
-        for (const project of localProjects) {
-            if (!project.nexusProductId) continue
+    debugLog(`[Nexus Sync] GET ${url} -> ${response.status}`, response.ok ? "success" : "failed")
 
-            const nexusProduct = nexusMap.get(project.nexusProductId)
-
-            // Product exists locally but was deleted on nexus — delete locally too
-            if (!nexusProduct) {
-                try {
-                    await deleteProject(project.id)
-                    deleted.push(project.id)
-                } catch (error) {
-                    errors.push(
-                        `Failed to delete local project ${project.id}: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`
-                    )
-                }
-                continue
-            }
-
-            // Product exists on both sides — check if nexus has different fields
-            const localTags = project.tags ?? []
-            const nexusTags = (nexusProduct.features as string[]) ?? []
-
-            const localPricing = Number(project.pricing)
-            const nexusPrice = Number(nexusProduct.price)
-
-            const nexusProductAny = nexusProduct as any
-
-            const needsUpdate =
-                project.title !== nexusProduct.name ||
-                project.description !== nexusProduct.longDescription ||
-                project.shortDescription !== nexusProduct.description ||
-                project.slug !== nexusProductAny.slug ||
-                project.status !== nexusToLocalStatus[nexusProduct.status ?? ""] ||
-                project.imageUrl !== nexusProduct.imageUrl ||
-                project.websiteUrl !== nexusProduct.demoUrl ||
-                project.category !== nexusProduct.category ||
-                JSON.stringify([...localTags].sort()) !== JSON.stringify([...nexusTags].sort()) ||
-                localPricing !== nexusPrice
-
-            if (needsUpdate) {
-                try {
-                    await updateDoc(doc(db, "projects", project.id), {
-                        title: nexusProduct.name,
-                        description: nexusProduct.longDescription,
-                        shortDescription: nexusProduct.description,
-                        slug: nexusProductAny.slug,
-                        status: nexusToLocalStatus[nexusProduct.status ?? ""] ?? project.status,
-                        imageUrl: nexusProduct.imageUrl,
-                        websiteUrl: nexusProduct.demoUrl,
-                        category: nexusProduct.category,
-                        tags: nexusTags,
-                        pricing: String(nexusPrice),
-                        updatedAt: new Date().toISOString(),
-                    })
-                    updated.push(project.id)
-                } catch (error) {
-                    errors.push(
-                        `Failed to update local project ${project.id}: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`
-                    )
-                }
-            }
-        }
-    } catch (error) {
-        // Silent failure for fetch errors — nexusprods may be down or unreachable
-        console.log("Nexus sync skipped:", error instanceof Error ? error.message : String(error))
+    if (!response.ok) {
+        throw new Error(`Nexus fetch failed (HTTP ${response.status})`)
     }
 
-    return { deleted, updated, errors }
+    const data = await response.json()
+
+    if (!Array.isArray(data?.products)) {
+        throw new Error("Nexus response did not include a products array")
+    }
+
+    const products = data.products as NexusProduct[]
+    const total = asFiniteNumber(data?.summary?.total) ?? products.length
+
+    return { products, total }
 }
