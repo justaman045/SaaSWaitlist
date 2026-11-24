@@ -44,7 +44,11 @@ export function ProjectCard({ project }: { project: Project }) {
             <CardContent className="flex-1 p-6">
                 <div className="flex items-center justify-between mb-2">
                     <h3 className="font-bold text-xl tracking-tight leading-none group-hover:text-primary transition-colors">
-                        {project.title}
+                        {hasSlug ? (
+                            <Link href={`/projects/${project.slug}`}>{project.title}</Link>
+                        ) : (
+                            project.title
+                        )}
                     </h3>
                 </div>
                 <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
@@ -66,16 +70,16 @@ export function ProjectCard({ project }: { project: Project }) {
                     )}
                 </div>
 
-                {project.status === "active" && hasSlug ? (
+                {hasSlug ? (
                     <Button asChild size="sm" className="bg-secondary text-secondary-foreground group-hover:bg-primary group-hover:text-primary-foreground hover:bg-secondary/80 hover:text-secondary-foreground rounded-full px-4 h-8 transition-colors">
                         <Link href={`/projects/${project.slug}`}>
-                            View
+                            {project.status === "active" ? "View" : "Join Waitlist"}
                             <ArrowUpRight className="ml-1 h-3 w-3" />
                         </Link>
                     </Button>
                 ) : (
                     <Button size="sm" disabled className="bg-muted text-muted-foreground border border-muted/40 rounded-full px-4 h-8 transition-colors">
-                        {project.status === "active" ? "Unavailable" : "Coming Soon"}
+                        Unavailable
                     </Button>
                 )}
             </CardFooter>
