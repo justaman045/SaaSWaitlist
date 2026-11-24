@@ -56,15 +56,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
     return [
         ...staticEntries,
-        // Only live projects are advertised — coming-soon projects are not
-        // linked from the directory.
+        // Every project with a slug is advertised. Coming-soon projects are
+        // linked from the directory too — their detail page carries the
+        // waitlist signup form — so leaving them out would keep the pages
+        // that sign-ups depend on out of the search index.
         ...projects
-            .filter((project) => project.status === "active" && project.slug)
+            .filter((project) => project.slug)
             .map((project) => ({
                 url: `${base}/projects/${encodeURIComponent(project.slug)}`,
                 lastModified: parseDate(project.updatedAt ?? project.createdAt),
                 changeFrequency: "weekly" as const,
-                priority: 0.7,
+                priority: project.status === "active" ? 0.7 : 0.6,
             })),
     ]
 }
